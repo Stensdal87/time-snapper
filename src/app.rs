@@ -1,0 +1,794 @@
+//! Brugerfladen.
+
+use std::collections::HashMap;
+use std::f32::consts::TAU;
+use std::path::PathBuf;
+use std::time::{Duration as StdDuration, Instant};
+
+use chrono::{Duration, Local, NaiveDate};
+use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
+
+use crate::data::{format_duration, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
+
+/// Hvor ofte en kørende timers "sidst set" gemmes.
+const HEARTBEAT: StdDuration = StdDuration::from_secs(30);
+
+const ACCENT: Color32 = Color32::from_rgb(70, 160, 230);
+
+#[derive(PartialEq)]
+enum Tab {
+    Timer,
+    History,
+}
+
+#[derive(Clone, Copy)]
+enum DeleteTarget {
+    Customer(Id),
+    Project(Id),
+}
+
+#[derive(PartialEq)]
+enum HistoryView {
+    /// Én linje pr. projekt.
+    Summary,
+    /// Hver registrering for sig.
+    All,
+}
+
+pub struct TimeSnapperApp {
+    data: Data,
+    path: PathBuf,
+    error: Option<String>,
+    tab: Tab,
+    always_on_top: bool,
+    new_customer: String,
+    /// Tekstfelter til "nyt projekt" pr. kunde.
+    new_project: HashMap<Id, String>,
+    history_date: NaiveDate,
+    history_view: HistoryView,
+    last_heartbeat: Instant,
+    started: Instant,
+    window_level_applied: bool,
+    call_dialog_open: bool,
+    /// Antal ikke-registrerede opkald sidst vi kiggede. Kommer der flere, åbnes dialogen.
+    seen_unassigned: usize,
+    /// Søgefelter i projektlisten og i opkaldsdialogen.
+    search: String,
+    dialog_search: String,
+    /// "Udfold alle"/"Sammenklap alle" anvendes på kunderne i næste frame.
+    set_all_open: Option<bool>,
+    /// Kunde eller projekt der venter på bekræftelse af sletning.
+    confirm_delete: Option<DeleteTarget>,
+}
+
+impl TimeSnapperApp {
+    pub fn new(ctx: &egui::Context, path: PathBuf) -> Self {
+        let (data, error) = match Data::load(&path) {
+            Ok(d) => (d, None),
+            // Gem aldrig oven i en fil vi ikke kunne læse.
+            Err(e) => (Data::default(), Some(e)),
+        };
+        let mut app = Self {
+            data,
+            path,
+            error,
+            tab: Tab::Timer,
+            always_on_top: true,
+            new_customer: String::new(),
+            new_project: HashMap::new(),
+            history_date: Local::now().date_naive(),
+            history_view: HistoryView::Summary,
+            last_heartbeat: Instant::now(),
+            started: Instant::now(),
+            window_level_applied: false,
+            call_dialog_open: false,
+            seen_unassigned: 0,
+            search: String::new(),
+            dialog_search: String::new(),
+            set_all_open: None,
+            confirm_delete: None,
+        };
+        ctx.set_theme(app.data.theme.to_egui());
+        if app.error.is_none() {
+            app.save();
+        }
+        app
+    }
+
+    fn save(&mut self) {
+        if let Err(e) = self.data.save(&self.path) {
+            self.error = Some(e);
+        }
+    }
+
+    fn apply_window_level(&self, ctx: &egui::Context) {
+        let level = if self.always_on_top {
+            egui::WindowLevel::AlwaysOnTop
+        } else {
+            egui::WindowLevel::Normal
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+    }
+
+    /// eframe husker størrelse og placering, men på X11 lægger vinduesmanageren
+    /// titellinjen oven i den placering vi beder om, så vinduet kryber nedad for
+    /// hver genstart. eframe har bedt om den gemte placering og fået den plus en
+    /// forskydning; bed derfor om den gemte placering minus forskydningen.
+    fn restore_window_position(&self, ctx: &egui::Context) {
+        let Some([x, y]) = self.data.window_pos else { return };
+        let Some(inner) = ctx.input(|i| i.viewport().inner_rect) else { return };
+        let wanted = Pos2::new(x, y);
+        let drift = wanted - inner.min;
+        if drift.length() > 1.0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(wanted + drift));
+        }
+    }
+
+    fn timer_tab(&mut self, ui: &mut egui::Ui) {
+        if !self.call_dialog_open && !self.data.unassigned.is_empty() {
+            let text = format!("📞 {} opkald mangler registrering", self.data.unassigned.len());
+            if ui
+                .add(egui::Button::new(RichText::new(text).color(Color32::BLACK)).fill(Color32::from_rgb(240, 190, 80)))
+                .clicked()
+            {
+                self.call_dialog_open = true;
+            }
+        }
+        ui.vertical_centered(|ui| {
+            self.round_timer(ui);
+            if self.data.active.is_none() {
+                ui.label(RichText::new("Vælg et projekt for at starte").weak());
+            }
+        });
+        ui.add_space(4.0);
+
+        let active = self.data.active.as_ref();
+        let on_call = active.is_some_and(|a| a.project_id.is_none());
+        let on_pause = active.is_some_and(|a| a.is_note(NOTE_PAUSE));
+        let running = active.is_some();
+        ui.columns(3, |cols| {
+            let size = [cols[0].available_width(), 26.0];
+            if cols[0]
+                .add_enabled(!on_call, egui::Button::new("📞 Telefon").min_size(size.into()))
+                .on_hover_text("Start tid på et opkald. Projektet kan vælges under eller efter opkaldet.")
+                .clicked()
+            {
+                self.data.start_call();
+                self.save();
+            }
+            if cols[1]
+                .add_enabled(!on_pause, egui::Button::new("☕ Pause").min_size(size.into()))
+                .on_hover_text("Registreres på Intern tid")
+                .clicked()
+            {
+                self.data.start_pause();
+                self.save();
+            }
+            if cols[2]
+                .add_enabled(running, egui::Button::new("⏹ Stop").min_size(size.into()))
+                .clicked()
+            {
+                self.data.stop();
+                self.save();
+            }
+        });
+        if on_call {
+            ui.add_space(4.0);
+            self.call_target_panel(ui);
+        }
+        ui.separator();
+
+        let today = Local::now().date_naive();
+        let totals: HashMap<Id, Duration> = self.data.totals_on(today).into_iter().collect();
+        let active_project = self.data.active.as_ref().and_then(|a| a.project_id);
+        let mut start_project = None;
+        let mut add_project = None;
+
+        search_field(ui, &mut self.search);
+        ui.horizontal(|ui| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.new_customer)
+                    .hint_text("Ny kunde…")
+                    .desired_width(ui.available_width() - 30.0),
+            );
+            let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if (ui.button("+").clicked() || enter) && !self.new_customer.trim().is_empty() {
+                let name = self.new_customer.trim().to_owned();
+                self.data.add_customer(&name);
+                self.new_customer.clear();
+                self.save();
+            }
+        });
+        ui.add_space(4.0);
+        let searching = !self.search.trim().is_empty();
+        let force_open = self.set_all_open.take();
+        let mut fold_all = None;
+        let mut delete = None;
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let mut any_match = false;
+            for customer in self.data.visible_customers() {
+                let Some(projects) = matching_projects(&self.data, customer, &self.search) else {
+                    continue;
+                };
+                any_match = true;
+                let internal_customer = self.data.is_internal_customer(customer.id);
+                let header = egui::CollapsingHeader::new(RichText::new(&customer.name).strong())
+                    .id_salt(customer.id)
+                    .default_open(true)
+                    // Under søgning vises alle træffere, også under sammenklappede kunder.
+                    .open(if searching { Some(true) } else { force_open })
+                    .show(ui, |ui| {
+                        for project in projects {
+                            ui.horizontal(|ui| {
+                                let is_active = active_project == Some(project.id);
+                                let label = if is_active {
+                                    RichText::new(format!("▶ {}", project.name)).color(ACCENT).strong()
+                                } else {
+                                    RichText::new(&project.name)
+                                };
+                                let response = ui.selectable_label(is_active, label);
+                                if response.clicked() && !is_active {
+                                    start_project = Some(project.id);
+                                }
+                                response.context_menu(|ui| {
+                                    let item = ui
+                                        .add_enabled(!self.data.is_internal(project.id), egui::Button::new("🗑 Slet projekt…"))
+                                        .on_disabled_hover_text("Intern tid kan ikke slettes");
+                                    if item.clicked() {
+                                        delete = Some(DeleteTarget::Project(project.id));
+                                        ui.close();
+                                    }
+                                });
+                                if let Some(d) = totals.get(&project.id) {
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.label(RichText::new(format_duration(*d)).weak().monospace());
+                                    });
+                                }
+                            });
+                        }
+                        if searching {
+                            return;
+                        }
+                        ui.horizontal(|ui| {
+                            let text = self.new_project.entry(customer.id).or_default();
+                            let response = ui.add(
+                                egui::TextEdit::singleline(text)
+                                    .hint_text("Nyt projekt…")
+                                    .desired_width(ui.available_width() - 30.0),
+                            );
+                            let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if (ui.button("+").clicked() || enter) && !text.trim().is_empty() {
+                                add_project = Some((customer.id, text.trim().to_owned()));
+                                text.clear();
+                            }
+                        });
+                    });
+                header.header_response.context_menu(|ui| {
+                    if ui.button("⊞ Udfold alle").clicked() {
+                        fold_all = Some(true);
+                        ui.close();
+                    }
+                    if ui.button("⊟ Sammenklap alle").clicked() {
+                        fold_all = Some(false);
+                        ui.close();
+                    }
+                    ui.separator();
+                    let item = ui
+                        .add_enabled(!internal_customer, egui::Button::new("🗑 Slet kunde…"))
+                        .on_disabled_hover_text("Den interne konto kan ikke slettes");
+                    if item.clicked() {
+                        delete = Some(DeleteTarget::Customer(customer.id));
+                        ui.close();
+                    }
+                });
+            }
+
+            if searching && !any_match {
+                ui.label(RichText::new("Ingen kunder eller projekter matcher søgningen.").weak());
+            }
+        });
+
+        if fold_all.is_some() {
+            self.set_all_open = fold_all;
+            ui.ctx().request_repaint();
+        }
+        if delete.is_some() {
+            self.confirm_delete = delete;
+        }
+
+        if let Some((customer_id, name)) = add_project {
+            self.data.add_project(customer_id, &name);
+            self.save();
+        }
+        if let Some(id) = start_project {
+            self.data.start(id);
+            self.save();
+        }
+    }
+
+    /// Rundt ur: ringen fyldes én gang i timen, prikken går rundt én gang i minuttet.
+    fn round_timer(&self, ui: &mut egui::Ui) {
+        let size = 150.0;
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+        let center = rect.center();
+        let ring_width = 12.0;
+        // Ringens midterlinje. Ring, bue og prik centreres alle om denne radius.
+        let radius = size / 2.0 - ring_width / 2.0 - 1.0;
+        let track = ui.visuals().widgets.inactive.bg_fill;
+
+        // egui tegner cirklers kant *udenfor* radius, så træk en halv ringbredde fra.
+        painter.circle_stroke(center, radius - ring_width / 2.0, Stroke::new(ring_width, track));
+
+        let (elapsed, label, total) = match &self.data.active {
+            Some(a) => {
+                let (label, total) = match a.project_id {
+                    Some(id) => (self.data.project_label(id), Some(self.data.project_total(id))),
+                    None => match self.target_label(&a.target) {
+                        Some(target) => (format!("📞 {target}"), None),
+                        None => ("📞 Telefonopkald".to_owned(), None),
+                    },
+                };
+                let label = match (&a.note, a.project_id) {
+                    (Some(note), Some(_)) => format!("{label} ({note})"),
+                    _ => label,
+                };
+                (Local::now() - a.start, label, total)
+            }
+            None => (Duration::zero(), String::new(), None),
+        };
+        let secs = elapsed.num_milliseconds() as f32 / 1000.0;
+
+        if self.data.active.is_some() {
+            let hour_fraction = (secs % 3600.0) / 3600.0;
+            let point_at = |fraction: f32| {
+                let angle = fraction * TAU - TAU / 4.0; // start kl. 12
+                center + Vec2::angled(angle) * radius
+            };
+            let steps = (hour_fraction * 100.0).ceil().max(1.0) as usize;
+            let arc: Vec<Pos2> = (0..=steps)
+                .map(|i| point_at(hour_fraction * i as f32 / steps as f32))
+                .collect();
+            painter.add(egui::Shape::line(arc, Stroke::new(ring_width - 4.0, ACCENT)));
+            painter.circle_filled(point_at((secs % 60.0) / 60.0), ring_width / 2.0 - 2.0, Color32::WHITE);
+        }
+
+        let text_color = ui.visuals().strong_text_color();
+        let current_pos = if total.is_some() { center - Vec2::new(0.0, 8.0) } else { center };
+        painter.text(
+            current_pos,
+            egui::Align2::CENTER_CENTER,
+            format_duration(elapsed),
+            egui::FontId::monospace(24.0),
+            text_color,
+        );
+        if let Some(total) = total {
+            painter.text(
+                center + Vec2::new(0.0, 16.0),
+                egui::Align2::CENTER_CENTER,
+                format!("I alt {}", format_duration(total)),
+                egui::FontId::monospace(12.0),
+                ui.visuals().weak_text_color(),
+            );
+        }
+        if !label.is_empty() {
+            ui.label(RichText::new(label).strong());
+        }
+    }
+
+    fn history_tab(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if ui.button("◀").clicked() {
+                self.history_date -= Duration::days(1);
+            }
+            ui.label(RichText::new(self.history_date.format("%d-%m-%Y").to_string()).strong());
+            if ui.button("▶").clicked() {
+                self.history_date += Duration::days(1);
+            }
+            if ui.button("I dag").clicked() {
+                self.history_date = Local::now().date_naive();
+            }
+        });
+        ui.separator();
+
+        let entries = self.data.entries_on(self.history_date);
+        if entries.is_empty() {
+            ui.label(RichText::new("Ingen registreringer denne dag.").weak());
+            return;
+        }
+
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.history_view, HistoryView::Summary, "Summeret");
+            ui.selectable_value(&mut self.history_view, HistoryView::All, "Alle registreringer");
+        });
+        ui.add_space(4.0);
+
+        let totals = self.data.totals_on(self.history_date);
+        let day_total = totals.iter().fold(Duration::zero(), |sum, (_, d)| sum + *d);
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::Grid::new("history").striped(true).show(ui, |ui| {
+                match self.history_view {
+                    HistoryView::Summary => {
+                        for (project_id, d) in &totals {
+                            let count = entries.iter().filter(|e| e.project_id == *project_id).count();
+                            ui.label(self.data.project_label(*project_id));
+                            ui.label(RichText::new(format!("{count}×")).weak())
+                                .on_hover_text(format!("{count} registreringer"));
+                            ui.label(RichText::new(format_duration(*d)).monospace());
+                            ui.end_row();
+                        }
+                    }
+                    HistoryView::All => {
+                        for e in &entries {
+                            let mut label = self.data.project_label(e.project_id);
+                            if let Some(note) = &e.note {
+                                label = format!("{label} ({note})");
+                            }
+                            ui.label(label);
+                            ui.label(
+                                RichText::new(format!("{}–{}", e.start.format("%H:%M"), e.end.format("%H:%M")))
+                                    .monospace()
+                                    .weak(),
+                            );
+                            ui.label(RichText::new(format_duration(e.duration())).monospace());
+                            ui.end_row();
+                        }
+                    }
+                }
+                ui.label(RichText::new("I alt").strong());
+                ui.label("");
+                ui.label(RichText::new(format_duration(day_total)).monospace().strong());
+                ui.end_row();
+            });
+        });
+    }
+}
+
+impl eframe::App for TimeSnapperApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        // Luk den kørende timer pænt, når vinduet lukkes.
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.data.stop();
+            if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
+                self.data.window_pos = Some([rect.min.x, rect.min.y]);
+            }
+            self.save();
+        }
+
+        // På X11 går "hold øverst" tabt, hvis det sættes før vinduet er vist,
+        // så det sendes igen kort efter opstart.
+        if !self.window_level_applied {
+            let delay = StdDuration::from_millis(500);
+            if self.started.elapsed() >= delay {
+                self.apply_window_level(&ctx);
+                self.restore_window_position(&ctx);
+                self.window_level_applied = true;
+            } else {
+                ctx.request_repaint_after(delay);
+            }
+        }
+
+        if let Some(active) = &mut self.data.active {
+            if self.last_heartbeat.elapsed() >= HEARTBEAT {
+                active.last_seen = Local::now();
+                self.last_heartbeat = Instant::now();
+                self.save();
+            }
+            ctx.request_repaint_after(StdDuration::from_millis(250));
+        }
+
+        egui::Panel::top("tabs").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.tab, Tab::Timer, "⏱ Timer");
+                // Historikken åbner altid i den summerede visning.
+                if ui.selectable_value(&mut self.tab, Tab::History, "📅 Historik").changed() {
+                    self.history_view = HistoryView::Summary;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (icon, hover) = match self.data.theme {
+                        ThemeChoice::System => ("💻", "Tema: følger systemet"),
+                        ThemeChoice::Light => ("☀", "Tema: lyst"),
+                        ThemeChoice::Dark => ("🌙", "Tema: mørkt"),
+                    };
+                    if ui.button(icon).on_hover_text(format!("{hover} (klik for at skifte)")).clicked() {
+                        self.data.theme = self.data.theme.next();
+                        ctx.set_theme(self.data.theme.to_egui());
+                        self.save();
+                    }
+                    if ui
+                        .toggle_value(&mut self.always_on_top, "📌")
+                        .on_hover_text("Hold vinduet øverst")
+                        .changed()
+                    {
+                        self.apply_window_level(&ctx);
+                    }
+                });
+            });
+        });
+
+        if let Some(error) = self.error.clone() {
+            egui::Panel::bottom("error").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.colored_label(ui.visuals().error_fg_color, error);
+                    if ui.small_button("✕").clicked() {
+                        self.error = None;
+                    }
+                });
+            });
+        }
+
+        egui::CentralPanel::default().show(ui, |ui| match self.tab {
+            Tab::Timer => self.timer_tab(ui),
+            Tab::History => self.history_tab(ui),
+        });
+
+        let pending = self.data.unassigned.len();
+        if pending > self.seen_unassigned {
+            self.call_dialog_open = true;
+        }
+        self.seen_unassigned = pending;
+        if self.call_dialog_open && pending > 0 {
+            self.call_dialog(&ctx);
+        }
+        if let Some(target) = self.confirm_delete {
+            self.delete_dialog(&ctx, target);
+        }
+    }
+}
+
+impl TimeSnapperApp {
+    /// Spørger hvor det ældste ikke-registrerede telefonopkald skal registreres.
+    /// Enter registrerer (når et mål er udfyldt), Esc lukker dialogen uden at
+    /// miste opkaldet.
+    fn call_dialog(&mut self, ctx: &egui::Context) {
+        let call = self.data.unassigned[0].clone();
+        let mut target = call.target.clone();
+        let internal = self.data.internal_project_id();
+        let mut confirm = false;
+        let mut discard = false;
+
+        let modal = egui::Modal::new(egui::Id::unique("call_dialog")).show(ctx, |ui| {
+            ui.set_width(270.0);
+            ui.heading("📞 Telefonopkald");
+            ui.label(format!(
+                "{}  {}–{}  ({})",
+                call.start.format("%d-%m"),
+                call.start.format("%H:%M"),
+                call.end.format("%H:%M"),
+                format_duration(call.duration()),
+            ));
+            if self.data.unassigned.len() > 1 {
+                ui.label(RichText::new(format!("{} opkald mere venter", self.data.unassigned.len() - 1)).weak());
+            }
+            ui.label("Hvor skal tiden registreres?");
+            ui.separator();
+
+            let full = Vec2::new(ui.available_width(), 24.0);
+            let response = ui.add(
+                egui::Button::selectable(target.project_id == Some(internal), RichText::new("Intern tid").strong())
+                    .min_size(full),
+            );
+            if response.clicked() {
+                target = CallTarget { project_id: Some(internal), ..Default::default() };
+            }
+            confirm |= response.double_clicked();
+            ui.add_space(4.0);
+
+            search_field(ui, &mut self.dialog_search);
+            let mut matches = Vec::new();
+            egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                for customer in self.data.visible_customers() {
+                    let Some(projects) = matching_projects(&self.data, customer, &self.dialog_search) else {
+                        continue;
+                    };
+                    let projects: Vec<_> = projects.into_iter().filter(|p| p.id != internal).collect();
+                    if projects.is_empty() {
+                        continue;
+                    }
+                    matches.extend(projects.iter().map(|p| p.id));
+                    ui.label(RichText::new(&customer.name).strong());
+                    for project in projects {
+                        let response = ui.selectable_label(target.project_id == Some(project.id), format!("   {}", project.name));
+                        if response.clicked() {
+                            target = CallTarget { project_id: Some(project.id), ..Default::default() };
+                        }
+                        confirm |= response.double_clicked();
+                    }
+                }
+            });
+
+            ui.separator();
+            ui.label(RichText::new("Eller skriv kunde og projekt (oprettes hvis de ikke findes):").weak());
+            typed_target_fields(ui, &mut target);
+            ui.add_space(4.0);
+
+            let complete = self.data.target_is_complete(&target);
+            ui.horizontal(|ui| {
+                confirm |= ui
+                    .add_enabled(complete, egui::Button::new("✔ Registrér"))
+                    .on_hover_text("Enter")
+                    .clicked();
+                if ui.button("Senere").on_hover_text("Esc").clicked() {
+                    ui.close();
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("🗑 Kassér").on_hover_text("Opkaldet registreres ikke").clicked() {
+                        discard = true;
+                    }
+                });
+            });
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                // Har søgningen kun ét træf, vælger Enter det.
+                if !complete && !self.dialog_search.trim().is_empty() && matches.len() == 1 {
+                    target = CallTarget { project_id: Some(matches[0]), ..Default::default() };
+                }
+                confirm = true;
+            }
+            confirm &= self.data.target_is_complete(&target);
+        });
+
+        if modal.should_close() {
+            self.call_dialog_open = false;
+        }
+        if target != call.target {
+            self.data.unassigned[0].target = target;
+            self.save();
+        }
+        if confirm && self.data.register_first_unassigned() {
+            self.dialog_search.clear();
+            self.save();
+        } else if discard {
+            self.data.discard_first_unassigned();
+            self.dialog_search.clear();
+            self.save();
+        }
+    }
+
+    /// Spørger om man er sikker, før en kunde eller et projekt slettes.
+    fn delete_dialog(&mut self, ctx: &egui::Context, target: DeleteTarget) {
+        let (title, name, details) = match target {
+            DeleteTarget::Customer(id) => {
+                let name = self.data.customer(id).map_or_else(String::new, |c| c.name.clone());
+                let projects = self.data.visible_projects().filter(|p| p.customer_id == id).count();
+                let (count, total) = self.data.customer_stats(id);
+                let details = format!(
+                    "Kundens {projects} projekt(er) slettes også. {count} registrering(er) ({}) bevares i historikken.",
+                    format_duration(total)
+                );
+                ("Slet kunde", name, details)
+            }
+            DeleteTarget::Project(id) => {
+                let (count, total) = self.data.project_stats(id);
+                let details = format!("{count} registrering(er) ({}) bevares i historikken.", format_duration(total));
+                ("Slet projekt", self.data.project_label(id), details)
+            }
+        };
+        let affects_timer = self.data.active.as_ref().and_then(|a| a.project_id).is_some_and(|id| match target {
+            DeleteTarget::Project(p) => p == id,
+            DeleteTarget::Customer(c) => self.data.project(id).is_some_and(|p| p.customer_id == c),
+        });
+
+        let mut confirmed = false;
+        let modal = egui::Modal::new(egui::Id::unique("delete_dialog")).show(ctx, |ui| {
+            ui.set_width(260.0);
+            ui.heading(format!("🗑 {title}"));
+            ui.label(format!("Er du sikker på, at du vil slette \"{name}\"?"));
+            ui.add_space(4.0);
+            ui.label(RichText::new(details).weak());
+            if affects_timer {
+                ui.label(RichText::new("Timeren kører på dette projekt og bliver stoppet.").color(ui.visuals().warn_fg_color));
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let delete = egui::Button::new(RichText::new("🗑 Slet").color(Color32::WHITE))
+                    .fill(Color32::from_rgb(200, 60, 60));
+                if ui.add(delete).clicked() {
+                    confirmed = true;
+                }
+                if ui.button("Annuller").on_hover_text("Esc").clicked() {
+                    ui.close();
+                }
+            });
+        });
+
+        if confirmed {
+            match target {
+                DeleteTarget::Customer(id) => self.data.delete_customer(id),
+                DeleteTarget::Project(id) => self.data.delete_project(id),
+            }
+            self.confirm_delete = None;
+            self.save();
+        } else if modal.should_close() {
+            self.confirm_delete = None;
+        }
+    }
+
+    /// Valg af projekt mens et opkald kører, så det registreres direkte når det slutter.
+    fn call_target_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(active) = &self.data.active else { return };
+        let mut target = active.target.clone();
+        let internal = self.data.internal_project_id();
+
+        ui.label(RichText::new("Registrér opkaldet på:").weak());
+        let selected = match target.project_id {
+            Some(id) => self.data.project_label(id),
+            None => "Vælg eksisterende projekt…".to_owned(),
+        };
+        egui::ComboBox::from_id_salt("call_target")
+            .width(ui.available_width() - 8.0)
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                let ids = std::iter::once(internal)
+                    .chain(self.data.visible_projects().map(|p| p.id).filter(|id| *id != internal));
+                for id in ids {
+                    if ui.selectable_label(target.project_id == Some(id), self.data.project_label(id)).clicked() {
+                        target = CallTarget { project_id: Some(id), ..Default::default() };
+                    }
+                }
+            });
+        typed_target_fields(ui, &mut target);
+
+        if let Some(active) = &mut self.data.active
+            && active.target != target
+        {
+            active.target = target;
+            self.save();
+        }
+    }
+
+    /// "Kunde / Projekt" for et opkalds mål, hvis det er udfyldt.
+    fn target_label(&self, target: &CallTarget) -> Option<String> {
+        if let Some(id) = target.project_id {
+            return Some(self.data.project_label(id));
+        }
+        let (customer, project) = (target.customer.trim(), target.project.trim());
+        (!customer.is_empty() && !project.is_empty()).then(|| format!("{customer} / {project}"))
+    }
+}
+
+/// To tekstfelter til ny/eksisterende kunde og projekt. At skrive i dem fravælger
+/// et valgt eksisterende projekt.
+fn typed_target_fields(ui: &mut egui::Ui, target: &mut CallTarget) {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0 - 4.0;
+        changed |= ui
+            .add(egui::TextEdit::singleline(&mut target.customer).hint_text("Kunde").desired_width(width))
+            .changed();
+        changed |= ui
+            .add(egui::TextEdit::singleline(&mut target.project).hint_text("Projekt").desired_width(width))
+            .changed();
+    });
+    if changed {
+        target.project_id = None;
+    }
+}
+
+fn search_field(ui: &mut egui::Ui, query: &mut String) {
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(query)
+                .hint_text("🔍 Søg kunde eller projekt…")
+                .desired_width(ui.available_width() - 30.0),
+        );
+        if ui.add_enabled(!query.is_empty(), egui::Button::new("✕")).clicked() {
+            query.clear();
+        }
+    });
+}
+
+/// Kundens projekter der matcher søgningen (uden hensyn til store/små bogstaver).
+/// Matcher kundens navn, kommer alle projekterne med. `None` betyder at kunden
+/// skal skjules.
+fn matching_projects<'a>(data: &'a Data, customer: &Customer, query: &str) -> Option<Vec<&'a Project>> {
+    let query = query.trim().to_lowercase();
+    let projects = data.visible_projects().filter(|p| p.customer_id == customer.id);
+    if query.is_empty() || customer.name.to_lowercase().contains(&query) {
+        return Some(projects.collect());
+    }
+    let hits: Vec<_> = projects.filter(|p| p.name.to_lowercase().contains(&query)).collect();
+    (!hits.is_empty()).then_some(hits)
+}
