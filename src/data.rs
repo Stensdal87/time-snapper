@@ -46,6 +46,13 @@ impl TimeEntry {
     }
 }
 
+/// En registrering på en bestemt dag. `index` peger ind i `Data.entries`;
+/// `None` er den kørende timer, som ikke kan rettes.
+pub struct DayEntry {
+    pub index: Option<usize>,
+    pub entry: TimeEntry,
+}
+
 /// Hvor et telefonopkald skal registreres: enten et eksisterende projekt eller
 /// en kunde og et projekt skrevet som tekst (oprettes hvis de ikke findes).
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq)]
@@ -272,6 +279,41 @@ impl Data {
         }
     }
 
+    /// Omdøber en kunde. Navnet må ikke være tomt eller allerede bruges af en
+    /// anden kunde (uanset store/små bogstaver).
+    pub fn rename_customer(&mut self, customer_id: Id, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Navnet må ikke være tomt".to_owned());
+        }
+        if self.visible_customers().any(|c| c.id != customer_id && same_name(&c.name, name)) {
+            return Err("Der findes allerede en kunde med det navn".to_owned());
+        }
+        let customer = self.customers.iter_mut().find(|c| c.id == customer_id).ok_or("Kunden findes ikke")?;
+        customer.name = name.to_owned();
+        Ok(())
+    }
+
+    /// Omdøber et projekt. Navnet må ikke være tomt eller allerede bruges af et
+    /// andet projekt hos samme kunde.
+    pub fn rename_project(&mut self, project_id: Id, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("Navnet må ikke være tomt".to_owned());
+        }
+        let customer_id = self.project(project_id).ok_or("Projektet findes ikke")?.customer_id;
+        if self
+            .visible_projects()
+            .any(|p| p.id != project_id && p.customer_id == customer_id && same_name(&p.name, name))
+        {
+            return Err("Kunden har allerede et projekt med det navn".to_owned());
+        }
+        if let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) {
+            project.name = name.to_owned();
+        }
+        Ok(())
+    }
+
     /// Skjuler en kunde og alle dens projekter.
     pub fn delete_customer(&mut self, customer_id: Id) {
         if self.is_internal_customer(customer_id) {
@@ -371,15 +413,14 @@ impl Data {
             return Some(id);
         }
         let (customer, project) = target.typed()?;
-        let same = |a: &str, b: &str| a.to_lowercase() == b.to_lowercase();
-        let existing = self.visible_customers().find(|c| same(&c.name, customer)).map(|c| c.id);
+        let existing = self.visible_customers().find(|c| same_name(&c.name, customer)).map(|c| c.id);
         let customer_id = match existing {
             Some(id) => id,
             None => self.add_customer(customer),
         };
         let existing = self
             .visible_projects()
-            .find(|p| p.customer_id == customer_id && same(&p.name, project))
+            .find(|p| p.customer_id == customer_id && same_name(&p.name, project))
             .map(|p| p.id);
         Some(match existing {
             Some(id) => id,
@@ -421,27 +462,57 @@ impl Data {
     }
 
     /// Alle registreringer der startede på den givne dag, inkl. den aktive timer
-    /// hvis den hører til et projekt.
-    pub fn entries_on(&self, date: NaiveDate) -> Vec<TimeEntry> {
-        let mut list: Vec<TimeEntry> = self
+    /// hvis den hører til et projekt. Sorteret efter starttid.
+    pub fn entries_on(&self, date: NaiveDate) -> Vec<DayEntry> {
+        let mut list: Vec<DayEntry> = self
             .entries
             .iter()
-            .filter(|e| e.start.date_naive() == date)
-            .cloned()
+            .enumerate()
+            .filter(|(_, e)| e.start.date_naive() == date)
+            .map(|(i, e)| DayEntry { index: Some(i), entry: e.clone() })
             .collect();
-        if let Some(a) = &self.active
-            && let Some(project_id) = a.project_id
-            && a.start.date_naive() == date
+        if let Some(entry) = self.running_entry()
+            && entry.start.date_naive() == date
         {
-            list.push(TimeEntry {
-                project_id,
-                start: a.start,
-                end: Local::now(),
-                note: a.note.clone(),
-            });
+            list.push(DayEntry { index: None, entry });
         }
-        list.sort_by_key(|e| e.start);
+        list.sort_by_key(|e| e.entry.start);
         list
+    }
+
+    /// Den kørende timer som registrering frem til nu, hvis den hører til et projekt.
+    fn running_entry(&self) -> Option<TimeEntry> {
+        let a = self.active.as_ref()?;
+        Some(TimeEntry { project_id: a.project_id?, start: a.start, end: Local::now(), note: a.note.clone() })
+    }
+
+    pub fn add_entry(&mut self, entry: TimeEntry) {
+        self.entries.push(entry);
+    }
+
+    pub fn update_entry(&mut self, index: usize, entry: TimeEntry) {
+        if let Some(e) = self.entries.get_mut(index) {
+            *e = entry;
+        }
+    }
+
+    pub fn delete_entry(&mut self, index: usize) {
+        if index < self.entries.len() {
+            self.entries.remove(index);
+        }
+    }
+
+    /// Andre registreringer (inkl. den kørende timer) der overlapper tidsrummet.
+    /// `skip` er registreringen selv, når den rettes.
+    pub fn overlapping(&self, entry: &TimeEntry, skip: Option<usize>) -> Vec<TimeEntry> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != skip)
+            .map(|(_, e)| e.clone())
+            .chain(self.running_entry())
+            .filter(|e| e.start < entry.end && entry.start < e.end)
+            .collect()
     }
 
     /// Al tid brugt på et projekt nogensinde, inkl. den aktive timer.
@@ -461,7 +532,7 @@ impl Data {
     /// Samlet tid pr. projekt på en dag, sorteret efter mest tid først.
     pub fn totals_on(&self, date: NaiveDate) -> Vec<(Id, Duration)> {
         let mut totals: Vec<(Id, Duration)> = Vec::new();
-        for e in self.entries_on(date) {
+        for DayEntry { entry: e, .. } in self.entries_on(date) {
             match totals.iter_mut().find(|(id, _)| *id == e.project_id) {
                 Some((_, d)) => *d += e.duration(),
                 None => totals.push((e.project_id, e.duration())),
@@ -472,6 +543,11 @@ impl Data {
     }
 }
 
+/// Navne sammenlignes uden hensyn til store/små bogstaver (også æ, ø, å).
+fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
 pub fn format_duration(d: Duration) -> String {
     let secs = d.num_seconds().max(0);
     format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
@@ -480,6 +556,7 @@ pub fn format_duration(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn active_since(project_id: Option<Id>, minutes: i64) -> Option<ActiveTimer> {
         Some(ActiveTimer {
@@ -603,6 +680,54 @@ mod tests {
         data.delete_project(internal);
         assert!(!data.project(internal).unwrap().deleted);
         assert!(!data.customer(customer).unwrap().deleted);
+    }
+
+    #[test]
+    fn edit_and_delete_entries_and_find_overlaps() {
+        let mut data = Data::default();
+        let c = data.add_customer("Kunde");
+        let p = data.add_project(c, "A");
+        let at = |h: u32, m: u32| {
+            Local.from_local_datetime(&NaiveDate::from_ymd_opt(2026, 10, 20).unwrap().and_hms_opt(h, m, 0).unwrap())
+                .unwrap()
+        };
+        let entry = |from, to| TimeEntry { project_id: p, start: from, end: to, note: None };
+        data.add_entry(entry(at(8, 0), at(9, 0)));
+        data.add_entry(entry(at(10, 0), at(11, 0)));
+
+        // 8:30-10:30 rammer begge; rettes nr. 0 til det, overlapper den kun nr. 1.
+        let changed = entry(at(8, 30), at(10, 30));
+        assert_eq!(data.overlapping(&changed, None).len(), 2);
+        assert_eq!(data.overlapping(&changed, Some(0)).len(), 1);
+        // Registreringer der bare støder op til hinanden overlapper ikke.
+        assert!(data.overlapping(&entry(at(9, 0), at(10, 0)), None).is_empty());
+
+        data.update_entry(0, changed);
+        assert_eq!(data.entries[0].duration(), Duration::hours(2));
+        data.delete_entry(1);
+        assert_eq!(data.entries.len(), 1);
+        assert_eq!(data.entries_on(NaiveDate::from_ymd_opt(2026, 10, 20).unwrap())[0].index, Some(0));
+    }
+
+    #[test]
+    fn rename_rejects_empty_and_duplicate_names() {
+        let mut data = Data::default();
+        let a = data.add_customer("Alfa");
+        let b = data.add_customer("Beta");
+        let p1 = data.add_project(a, "Web");
+        let p2 = data.add_project(a, "App");
+        let other = data.add_project(b, "Andet");
+
+        assert!(data.rename_customer(a, "  ").is_err());
+        assert!(data.rename_customer(a, "beta").is_err(), "navnet bruges af en anden kunde");
+        assert!(data.rename_customer(a, "ALFA").is_ok(), "samme kunde må skifte store/små bogstaver");
+        assert!(data.rename_customer(a, " Gamma ").is_ok());
+        assert_eq!(data.customer(a).unwrap().name, "Gamma");
+
+        assert!(data.rename_project(p1, "app").is_err(), "navnet bruges hos samme kunde");
+        assert!(data.rename_project(other, "Web").is_ok(), "samme navn hos en anden kunde er fint");
+        assert!(data.rename_project(p2, "Mobil").is_ok());
+        assert_eq!(data.project_label(p2), "Gamma / Mobil");
     }
 
     #[test]

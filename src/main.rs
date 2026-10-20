@@ -3,6 +3,7 @@
 
 mod app;
 mod data;
+mod entry_editor;
 
 use eframe::egui;
 

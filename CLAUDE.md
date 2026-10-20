@@ -25,7 +25,8 @@ Et lille vindue (der kan holdes øverst), som tager tid på projekter under kund
 - Tema-knappen (💻/☀/🌙) skifter mellem system, lyst og mørkt. Valget gemmes som `Data.theme`.
 - Pause-knappen registrerer tid på projektet "Intern / Intern tid". Det oprettes automatisk og spores via `internal_project`.
 - Registreringer kan have en `note` ("Telefon"/"Pause"), som vises i historikken.
-- Højreklik på en kunde giver: Udfold alle, Sammenklap alle og Slet kunde. Højreklik på et projekt giver: Slet projekt. Sletning skal bekræftes i en dialog (Esc annullerer). Det er en "blød" sletning: `deleted: true` skjuler kunden eller projektet alle steder (`visible_customers` og `visible_projects`), men historikken beholder navne og tid. Kører timeren på projektet, stoppes den først. Intern kan ikke slettes. Skriver man et slettet navn i opkaldsdialogen, oprettes en ny kunde eller et nyt projekt.
+- Højreklik på en kunde giver: Udfold alle, Sammenklap alle, Omdøb og Slet kunde. Højreklik på et projekt giver: Omdøb og Slet projekt. Omdøbning (`rename_customer` og `rename_project`) afviser tomme navne og navne, der allerede bruges (kunder globalt, projekter inden for samme kunde, uden hensyn til store og små bogstaver). Intern og Intern tid kan omdøbes, fordi de spores via id. Sletning skal bekræftes i en dialog (Esc annullerer). Det er en "blød" sletning: `deleted: true` skjuler kunden eller projektet alle steder (`visible_customers` og `visible_projects`), men historikken beholder navne og tid. Kører timeren på projektet, stoppes den først. Intern kan ikke slettes. Skriver man et slettet navn i opkaldsdialogen, oprettes en ny kunde eller et nyt projekt.
+- Rette registreringer (`src/entry_editor.rs`): I "Alle registreringer" åbner et klik eller højreklik på en linje en modal dialog, hvor man retter projekt, type, dato og tid eller sletter. Sletning kræver et ekstra "Ja, slet". ➕ tilføjer en ny registrering. `Data::entries_on` returnerer `DayEntry` med et `index` ind i `entries` (`None` er den kørende timer, som ikke kan rettes). Tidsfelter, man ikke har rørt, beholder deres sekunder. Overlap giver kun en advarsel og blokerer ikke. Tid over midnat understøttes ikke.
 - Historikken har to visninger. "Summeret" giver én linje pr. projekt med antal registreringer og total. "Alle registreringer" viser hver registrering for sig. Summeret er standard og vælges igen, hver gang man går over på fanen.
 - Fanen Historik viser registreringer og totaler pr. dag, og man kan bladre mellem dagene.
 
@@ -33,6 +34,7 @@ Et lille vindue (der kan holdes øverst), som tager tid på projekter under kund
 - `src/main.rs` står for vinduesopsætningen (eframe/egui 0.37). Bemærk den nye API: `App::ui(&mut self, ui, frame)` og `egui::Panel::top/bottom(...).show(ui, ..)`.
 - `src/data.rs` indeholder datamodellen og lagringen og har unit tests.
 - `src/app.rs` indeholder brugerfladen.
+- `src/entry_editor.rs` indeholder dialogen til at rette og tilføje registreringer, inkl. tolkning af tid og dato.
 
 Hold øverst på Linux: Wayland tillader det ikke, og winit ignorerer det her uden at sige noget. Derfor tvinger `main.rs` X11/XWayland (via `winit` med `with_x11`, kun Linux). På X11 går niveauet tabt, hvis det sættes før vinduet vises, så `app.rs` sender det igen 0,5 sekund efter opstart. Man kan tjekke det med `xprop -id <id> _NET_WM_STATE`.
 
@@ -42,5 +44,5 @@ Data ligger i `~/.local/share/timesnapper/data.json` (på Windows i `%APPDATA%\T
 - Kørende timer: `active` gemmes med en `last_seen`, der opdateres hvert 30. sekund. Lukkes vinduet, stoppes timeren. Efter et nedbrud afsluttes timeren ved `last_seen`.
 
 ## Status
-- Under git (branch `main`). Skal ligge på GitHub-kontoen Stensdal87 som et privat repo.
-- Første proof of concept er lavet. Mulige næste skridt: redigere/slette registreringer, omdøbe/slette kunder og projekter, ugeoverblik, eksport til CSV, ikon i proceslinjen.
+- Under git (branch `main`). Ligger på GitHub som privat repo: https://github.com/Stensdal87/time-snapper
+- Første proof of concept er lavet. Mulige næste skridt: gendanne slettede, uge- og månedsoverblik, eksport til CSV, ikon i proceslinjen, Windows-build.

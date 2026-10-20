@@ -8,6 +8,7 @@ use std::time::{Duration as StdDuration, Instant};
 use chrono::{Duration, Local, NaiveDate};
 use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 
+use crate::entry_editor::{EditorAction, EntryEditor};
 use crate::data::{format_duration, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
@@ -21,10 +22,19 @@ enum Tab {
     History,
 }
 
+/// En kunde eller et projekt, f.eks. til sletning eller omdøbning.
 #[derive(Clone, Copy)]
-enum DeleteTarget {
+enum Item {
     Customer(Id),
     Project(Id),
+}
+
+/// En igangværende omdøbning af en kunde eller et projekt.
+struct Rename {
+    item: Item,
+    name: String,
+    error: Option<String>,
+    focused: bool,
 }
 
 #[derive(PartialEq)]
@@ -58,7 +68,10 @@ pub struct TimeSnapperApp {
     /// "Udfold alle"/"Sammenklap alle" anvendes på kunderne i næste frame.
     set_all_open: Option<bool>,
     /// Kunde eller projekt der venter på bekræftelse af sletning.
-    confirm_delete: Option<DeleteTarget>,
+    confirm_delete: Option<Item>,
+    rename: Option<Rename>,
+    /// Åben dialog til at rette/tilføje en registrering.
+    editor: Option<EntryEditor>,
 }
 
 impl TimeSnapperApp {
@@ -87,6 +100,8 @@ impl TimeSnapperApp {
             dialog_search: String::new(),
             set_all_open: None,
             confirm_delete: None,
+            rename: None,
+            editor: None,
         };
         ctx.set_theme(app.data.theme.to_egui());
         if app.error.is_none() {
@@ -204,6 +219,7 @@ impl TimeSnapperApp {
         let force_open = self.set_all_open.take();
         let mut fold_all = None;
         let mut delete = None;
+        let mut rename = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             let mut any_match = false;
@@ -232,11 +248,15 @@ impl TimeSnapperApp {
                                     start_project = Some(project.id);
                                 }
                                 response.context_menu(|ui| {
+                                    if ui.button("✏ Omdøb…").clicked() {
+                                        rename = Some((Item::Project(project.id), project.name.clone()));
+                                        ui.close();
+                                    }
                                     let item = ui
                                         .add_enabled(!self.data.is_internal(project.id), egui::Button::new("🗑 Slet projekt…"))
                                         .on_disabled_hover_text("Intern tid kan ikke slettes");
                                     if item.clicked() {
-                                        delete = Some(DeleteTarget::Project(project.id));
+                                        delete = Some(Item::Project(project.id));
                                         ui.close();
                                     }
                                 });
@@ -274,11 +294,15 @@ impl TimeSnapperApp {
                         ui.close();
                     }
                     ui.separator();
+                    if ui.button("✏ Omdøb…").clicked() {
+                        rename = Some((Item::Customer(customer.id), customer.name.clone()));
+                        ui.close();
+                    }
                     let item = ui
                         .add_enabled(!internal_customer, egui::Button::new("🗑 Slet kunde…"))
                         .on_disabled_hover_text("Den interne konto kan ikke slettes");
                     if item.clicked() {
-                        delete = Some(DeleteTarget::Customer(customer.id));
+                        delete = Some(Item::Customer(customer.id));
                         ui.close();
                     }
                 });
@@ -295,6 +319,9 @@ impl TimeSnapperApp {
         }
         if delete.is_some() {
             self.confirm_delete = delete;
+        }
+        if let Some((item, name)) = rename {
+            self.rename = Some(Rename { item, name, error: None, focused: false });
         }
 
         if let Some((customer_id, name)) = add_project {
@@ -393,26 +420,35 @@ impl TimeSnapperApp {
         ui.separator();
 
         let entries = self.data.entries_on(self.history_date);
+        let add_clicked = ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.history_view, HistoryView::Summary, "Summeret");
+            ui.selectable_value(&mut self.history_view, HistoryView::All, "Alle registreringer");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.button("➕").on_hover_text("Tilføj registrering").clicked()
+            })
+            .inner
+        });
+        if add_clicked.inner {
+            let last_end = entries.iter().filter(|e| e.index.is_some()).map(|e| e.entry.end).max();
+            self.editor = Some(EntryEditor::new(self.history_date, last_end));
+        }
+        ui.add_space(4.0);
+
         if entries.is_empty() {
             ui.label(RichText::new("Ingen registreringer denne dag.").weak());
             return;
         }
 
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.history_view, HistoryView::Summary, "Summeret");
-            ui.selectable_value(&mut self.history_view, HistoryView::All, "Alle registreringer");
-        });
-        ui.add_space(4.0);
-
         let totals = self.data.totals_on(self.history_date);
         let day_total = totals.iter().fold(Duration::zero(), |sum, (_, d)| sum + *d);
+        let mut open_editor = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("history").striped(true).show(ui, |ui| {
                 match self.history_view {
                     HistoryView::Summary => {
                         for (project_id, d) in &totals {
-                            let count = entries.iter().filter(|e| e.project_id == *project_id).count();
+                            let count = entries.iter().filter(|e| e.entry.project_id == *project_id).count();
                             ui.label(self.data.project_label(*project_id));
                             ui.label(RichText::new(format!("{count}×")).weak())
                                 .on_hover_text(format!("{count} registreringer"));
@@ -421,12 +457,35 @@ impl TimeSnapperApp {
                         }
                     }
                     HistoryView::All => {
-                        for e in &entries {
+                        for day_entry in &entries {
+                            let e = &day_entry.entry;
                             let mut label = self.data.project_label(e.project_id);
                             if let Some(note) = &e.note {
                                 label = format!("{label} ({note})");
                             }
-                            ui.label(label);
+                            match day_entry.index {
+                                Some(index) => {
+                                    let response = ui.selectable_label(false, label).on_hover_text("Klik for at rette");
+                                    if response.clicked() {
+                                        open_editor = Some(EntryEditor::edit(index, e));
+                                    }
+                                    response.context_menu(|ui| {
+                                        if ui.button("✏ Ret…").clicked() {
+                                            open_editor = Some(EntryEditor::edit(index, e));
+                                            ui.close();
+                                        }
+                                        if ui.button("🗑 Slet…").clicked() {
+                                            open_editor = Some(EntryEditor::delete(index, e));
+                                            ui.close();
+                                        }
+                                    });
+                                }
+                                // Den kørende timer kan ikke rettes, før den er stoppet.
+                                None => {
+                                    ui.label(RichText::new(format!("▶ {label}")).color(ACCENT))
+                                        .on_hover_text("Kører stadig. Stop timeren for at rette den.");
+                                }
+                            }
                             ui.label(
                                 RichText::new(format!("{}–{}", e.start.format("%H:%M"), e.end.format("%H:%M")))
                                     .monospace()
@@ -443,6 +502,23 @@ impl TimeSnapperApp {
                 ui.end_row();
             });
         });
+
+        if open_editor.is_some() {
+            self.editor = open_editor;
+        }
+    }
+
+    fn entry_editor(&mut self, ctx: &egui::Context) {
+        let Some(editor) = self.editor.as_mut() else { return };
+        match editor.show(ctx, &self.data) {
+            EditorAction::None => return,
+            EditorAction::Cancel => {}
+            EditorAction::Save(Some(index), entry) => self.data.update_entry(index, entry),
+            EditorAction::Save(None, entry) => self.data.add_entry(entry),
+            EditorAction::Delete(index) => self.data.delete_entry(index),
+        }
+        self.editor = None;
+        self.save();
     }
 }
 
@@ -536,6 +612,8 @@ impl eframe::App for TimeSnapperApp {
         if let Some(target) = self.confirm_delete {
             self.delete_dialog(&ctx, target);
         }
+        self.entry_editor(&ctx);
+        self.rename_dialog(&ctx);
     }
 }
 
@@ -547,6 +625,7 @@ impl TimeSnapperApp {
         let call = self.data.unassigned[0].clone();
         let mut target = call.target.clone();
         let internal = self.data.internal_project_id();
+        let internal_name = self.data.project(internal).map_or_else(String::new, |p| p.name.clone());
         let mut confirm = false;
         let mut discard = false;
 
@@ -568,7 +647,7 @@ impl TimeSnapperApp {
 
             let full = Vec2::new(ui.available_width(), 24.0);
             let response = ui.add(
-                egui::Button::selectable(target.project_id == Some(internal), RichText::new("Intern tid").strong())
+                egui::Button::selectable(target.project_id == Some(internal), RichText::new(internal_name).strong())
                     .min_size(full),
             );
             if response.clicked() {
@@ -647,10 +726,66 @@ impl TimeSnapperApp {
         }
     }
 
+    /// Omdøb en kunde eller et projekt. Enter gemmer, Esc annullerer.
+    fn rename_dialog(&mut self, ctx: &egui::Context) {
+        let Some(Rename { item, name, error, focused }) = self.rename.as_mut() else { return };
+        let item = *item;
+        let title = match item {
+            Item::Customer(_) => "✏ Omdøb kunde".to_owned(),
+            Item::Project(id) => {
+                let customer = self.data.project(id).and_then(|p| self.data.customer(p.customer_id));
+                format!("✏ Omdøb projekt hos {}", customer.map_or("?", |c| c.name.as_str()))
+            }
+        };
+        let mut save = false;
+        let mut cancel = false;
+
+        let modal = egui::Modal::new(egui::Id::unique("rename_dialog")).show(ctx, |ui| {
+            ui.set_width(260.0);
+            ui.heading(title);
+            ui.add_space(4.0);
+            let response = ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
+            // Markér feltet, når dialogen åbner, så man kan skrive med det samme.
+            if !*focused {
+                response.request_focus();
+                *focused = true;
+            }
+            if response.changed() {
+                *error = None;
+            }
+            if let Some(e) = error.as_ref() {
+                ui.colored_label(ui.visuals().error_fg_color, e);
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                save |= ui.button("✔ Gem").on_hover_text("Enter").clicked();
+                cancel |= ui.button("Annuller").on_hover_text("Esc").clicked();
+            });
+            save |= ui.input(|i| i.key_pressed(egui::Key::Enter));
+        });
+        cancel |= modal.should_close();
+
+        if save {
+            let result = match item {
+                Item::Customer(id) => self.data.rename_customer(id, name),
+                Item::Project(id) => self.data.rename_project(id, name),
+            };
+            match result {
+                Ok(()) => {
+                    self.rename = None;
+                    self.save();
+                }
+                Err(e) => *error = Some(e),
+            }
+        } else if cancel {
+            self.rename = None;
+        }
+    }
+
     /// Spørger om man er sikker, før en kunde eller et projekt slettes.
-    fn delete_dialog(&mut self, ctx: &egui::Context, target: DeleteTarget) {
+    fn delete_dialog(&mut self, ctx: &egui::Context, target: Item) {
         let (title, name, details) = match target {
-            DeleteTarget::Customer(id) => {
+            Item::Customer(id) => {
                 let name = self.data.customer(id).map_or_else(String::new, |c| c.name.clone());
                 let projects = self.data.visible_projects().filter(|p| p.customer_id == id).count();
                 let (count, total) = self.data.customer_stats(id);
@@ -660,15 +795,15 @@ impl TimeSnapperApp {
                 );
                 ("Slet kunde", name, details)
             }
-            DeleteTarget::Project(id) => {
+            Item::Project(id) => {
                 let (count, total) = self.data.project_stats(id);
                 let details = format!("{count} registrering(er) ({}) bevares i historikken.", format_duration(total));
                 ("Slet projekt", self.data.project_label(id), details)
             }
         };
         let affects_timer = self.data.active.as_ref().and_then(|a| a.project_id).is_some_and(|id| match target {
-            DeleteTarget::Project(p) => p == id,
-            DeleteTarget::Customer(c) => self.data.project(id).is_some_and(|p| p.customer_id == c),
+            Item::Project(p) => p == id,
+            Item::Customer(c) => self.data.project(id).is_some_and(|p| p.customer_id == c),
         });
 
         let mut confirmed = false;
@@ -696,8 +831,8 @@ impl TimeSnapperApp {
 
         if confirmed {
             match target {
-                DeleteTarget::Customer(id) => self.data.delete_customer(id),
-                DeleteTarget::Project(id) => self.data.delete_project(id),
+                Item::Customer(id) => self.data.delete_customer(id),
+                Item::Project(id) => self.data.delete_project(id),
             }
             self.confirm_delete = None;
             self.save();
