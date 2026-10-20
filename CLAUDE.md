@@ -27,6 +27,7 @@ Et lille vindue (der kan holdes øverst), som tager tid på projekter under kund
 - Registreringer kan have en `note` ("Telefon"/"Pause"), som vises i historikken.
 - Højreklik på en kunde giver: Udfold alle, Sammenklap alle, Omdøb og Slet kunde. Højreklik på et projekt giver: Omdøb og Slet projekt. Omdøbning (`rename_customer` og `rename_project`) afviser tomme navne og navne, der allerede bruges (kunder globalt, projekter inden for samme kunde, uden hensyn til store og små bogstaver). Intern og Intern tid kan omdøbes, fordi de spores via id. Sletning skal bekræftes i en dialog (Esc annullerer). Det er en "blød" sletning: `deleted: true` skjuler kunden eller projektet alle steder (`visible_customers` og `visible_projects`), men historikken beholder navne og tid. Kører timeren på projektet, stoppes den først. Intern kan ikke slettes. Skriver man et slettet navn i opkaldsdialogen, oprettes en ny kunde eller et nyt projekt.
 - Rette registreringer (`src/entry_editor.rs`): I "Alle registreringer" åbner et klik eller højreklik på en linje en modal dialog, hvor man retter projekt, type, dato og tid eller sletter. Sletning kræver et ekstra "Ja, slet". ➕ tilføjer en ny registrering. `Data::entries_on` returnerer `DayEntry` med et `index` ind i `entries` (`None` er den kørende timer, som ikke kan rettes). Tidsfelter, man ikke har rørt, beholder deres sekunder. Overlap giver kun en advarsel og blokerer ikke. Tid over midnat understøttes ikke.
+- Eksport (📤 i Historik): `src/export.rs` henter rækkerne (`collect`, hele dage fra og med til og med, kun afsluttede registreringer), summerer dem og skriver filen. CSV er i dansk Excel-format (`;`, decimalkomma, UTF-8 med BOM) og har enten alle registreringer eller den summerede liste. Excel (`rust_xlsxwriter`) har fanerne Registreringer og Summeret med SUM-totaler. `src/export_dialog.rs` er dialogen med periodeknapper (uger går mandag til søndag) og "Gem som" via `rfd` (xdg-portal på Linux). "Gem som" får vores vindue som forælder (`set_parent(frame)`). Fordi KDE's dialog kan havne bag et vindue, der ligger øverst, sættes vinduesniveauet desuden til Normal en frame (150 ms) før dialogen åbnes, og bagefter tilbage til AlwaysOnTop.
 - Historikken har to visninger. "Summeret" giver én linje pr. projekt med antal registreringer og total. "Alle registreringer" viser hver registrering for sig. Summeret er standard og vælges igen, hver gang man går over på fanen.
 - Fanen Historik viser registreringer og totaler pr. dag, og man kan bladre mellem dagene.
 
@@ -34,6 +35,7 @@ Et lille vindue (der kan holdes øverst), som tager tid på projekter under kund
 - `src/main.rs` står for vinduesopsætningen (eframe/egui 0.37). Bemærk den nye API: `App::ui(&mut self, ui, frame)` og `egui::Panel::top/bottom(...).show(ui, ..)`.
 - `src/data.rs` indeholder datamodellen og lagringen og har unit tests.
 - `src/app.rs` indeholder brugerfladen.
+- `src/export.rs` og `src/export_dialog.rs` står for eksport til CSV og Excel.
 - `src/entry_editor.rs` indeholder dialogen til at rette og tilføje registreringer, inkl. tolkning af tid og dato.
 
 Hold øverst på Linux: Wayland tillader det ikke, og winit ignorerer det her uden at sige noget. Derfor tvinger `main.rs` X11/XWayland (via `winit` med `with_x11`, kun Linux). På X11 går niveauet tabt, hvis det sættes før vinduet vises, så `app.rs` sender det igen 0,5 sekund efter opstart. Man kan tjekke det med `xprop -id <id> _NET_WM_STATE`.
@@ -45,4 +47,4 @@ Data ligger i `~/.local/share/timesnapper/data.json` (på Windows i `%APPDATA%\T
 
 ## Status
 - Under git (branch `main`). Ligger på GitHub som privat repo: https://github.com/Stensdal87/time-snapper
-- Første proof of concept er lavet. Mulige næste skridt: gendanne slettede, uge- og månedsoverblik, eksport til CSV, ikon i proceslinjen, Windows-build.
+- Første proof of concept er lavet. Mulige næste skridt: gendanne slettede, uge- og månedsoverblik, ikon i proceslinjen, Windows-build.

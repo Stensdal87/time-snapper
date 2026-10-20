@@ -9,6 +9,7 @@ use chrono::{Duration, Local, NaiveDate};
 use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 
 use crate::entry_editor::{EditorAction, EntryEditor};
+use crate::export_dialog::ExportDialog;
 use crate::data::{format_duration, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
@@ -72,6 +73,7 @@ pub struct TimeSnapperApp {
     rename: Option<Rename>,
     /// Åben dialog til at rette/tilføje en registrering.
     editor: Option<EntryEditor>,
+    export: Option<ExportDialog>,
 }
 
 impl TimeSnapperApp {
@@ -102,6 +104,7 @@ impl TimeSnapperApp {
             confirm_delete: None,
             rename: None,
             editor: None,
+            export: None,
         };
         ctx.set_theme(app.data.theme.to_egui());
         if app.error.is_none() {
@@ -424,6 +427,9 @@ impl TimeSnapperApp {
             ui.selectable_value(&mut self.history_view, HistoryView::Summary, "Summeret");
             ui.selectable_value(&mut self.history_view, HistoryView::All, "Alle registreringer");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("📤").on_hover_text("Eksportér til Excel/CSV").clicked() {
+                    self.export = Some(ExportDialog::new());
+                }
                 ui.button("➕").on_hover_text("Tilføj registrering").clicked()
             })
             .inner
@@ -523,7 +529,7 @@ impl TimeSnapperApp {
 }
 
 impl eframe::App for TimeSnapperApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Luk den kørende timer pænt, når vinduet lukkes.
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -614,6 +620,11 @@ impl eframe::App for TimeSnapperApp {
         }
         self.entry_editor(&ctx);
         self.rename_dialog(&ctx);
+        if let Some(export) = self.export.as_mut()
+            && !export.show(&ctx, &self.data, frame, self.always_on_top)
+        {
+            self.export = None;
+        }
     }
 }
 

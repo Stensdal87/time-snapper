@@ -10,6 +10,8 @@ Det kan ligge øverst på skærmen uden at være i vejen.
 - **📞 Telefon**: start tid på et opkald og vælg kunde/projekt under eller efter opkaldet
 - **☕ Pause**: registreres automatisk på "Intern tid"
 - Historik pr. dag, enten summeret pr. projekt eller med alle registreringer
+- Ret, slet og tilføj registreringer, og omdøb kunder og projekter
+- Eksportér en periode til Excel (.xlsx) eller CSV
 - Søgning i kunder og projekter, og højreklik for at udfolde/sammenklappe alle eller slette
 - Lyst/mørkt tema, "hold øverst", og programmet husker vinduets størrelse og placering
 

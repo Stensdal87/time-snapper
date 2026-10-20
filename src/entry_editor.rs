@@ -237,7 +237,7 @@ fn parse_time(text: &str) -> Option<NaiveTime> {
 }
 
 /// Accepterer dd-mm-åååå, dd.mm.åååå, dd/mm/åååå og åååå-mm-dd.
-fn parse_date(text: &str) -> Option<NaiveDate> {
+pub fn parse_date(text: &str) -> Option<NaiveDate> {
     let text = text.trim();
     ["%d-%m-%Y", "%d.%m.%Y", "%d/%m/%Y", "%Y-%m-%d"]
         .iter()
