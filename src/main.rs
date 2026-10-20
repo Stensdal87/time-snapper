@@ -18,6 +18,7 @@ fn main() -> eframe::Result {
             .with_title(APP_NAME)
             .with_inner_size([320.0, 520.0])
             .with_min_inner_size([260.0, 300.0])
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default())
             .with_always_on_top(),
         ..Default::default()
     };

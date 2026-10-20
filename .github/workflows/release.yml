@@ -1,0 +1,55 @@
+# Bygger Windows-installeren og opretter en GitHub-release, når der pushes et
+# versions-tag, f.eks.:  git tag v0.1.0 && git push origin v0.1.0
+name: Windows-release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Byg
+        run: cargo build --release --locked
+
+      - name: Installér Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Byg installer og portable exe
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$version installer\time-snapper.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item target\release\time_snapper.exe "dist\TimeSnapper-portable-$version.exe"
+          Get-ChildItem dist
+
+      - name: Opret release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $notes = @"
+          ## Installation
+
+          Hent **TimeSnapper-Setup-$version.exe** og kør den. Den installerer kun for din bruger, så der kræves ikke administratorrettigheder.
+
+          **TimeSnapper-portable-$version.exe** kan køres direkte uden installation.
+
+          Programmet er ikke kodesigneret, så Windows SmartScreen kan advare første gang: vælg **Flere oplysninger → Kør alligevel**.
+
+          Data gemmes i ``%APPDATA%\TimeSnapper\`` og bliver liggende ved opdatering og afinstallation.
+          "@
+          gh release create "${{ github.ref_name }}" dist\*.exe --title "Time Snapper $version" --notes $notes
