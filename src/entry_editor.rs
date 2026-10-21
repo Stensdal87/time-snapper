@@ -23,6 +23,7 @@ pub struct EntryEditor {
     date: String,
     start: String,
     end: String,
+    description: String,
     confirm_delete: bool,
 }
 
@@ -36,6 +37,7 @@ impl EntryEditor {
             date: entry.start.format("%d-%m-%Y").to_string(),
             start: entry.start.format("%H:%M").to_string(),
             end: entry.end.format("%H:%M").to_string(),
+            description: entry.description.clone(),
             confirm_delete: false,
         }
     }
@@ -56,6 +58,7 @@ impl EntryEditor {
             date: date.format("%d-%m-%Y").to_string(),
             start: suggested_start.map(|t| t.format("%H:%M").to_string()).unwrap_or_default(),
             end: String::new(),
+            description: String::new(),
             confirm_delete: false,
         }
     }
@@ -78,7 +81,7 @@ impl EntryEditor {
         if end <= start {
             return Err("Til-tiden skal være efter fra-tiden".to_owned());
         }
-        Ok(TimeEntry { project_id, start, end, note: self.note.clone() })
+        Ok(TimeEntry { project_id, start, end, note: self.note.clone(), description: self.description.trim().to_owned() })
     }
 
     pub fn show(&mut self, ctx: &egui::Context, data: &Data) -> EditorAction {
@@ -113,6 +116,14 @@ impl EntryEditor {
                     ui.label("–");
                     ui.add(egui::TextEdit::singleline(&mut self.end).hint_text("til").desired_width(50.0));
                 });
+                ui.end_row();
+
+                ui.label("Note");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.description)
+                        .hint_text("Hvad er tiden brugt på?")
+                        .desired_width(200.0),
+                );
                 ui.end_row();
             });
 
@@ -277,7 +288,7 @@ mod tests {
     fn unchanged_times_keep_their_seconds() {
         let start = Local.with_ymd_and_hms(2026, 10, 20, 8, 0, 17).unwrap();
         let end = Local.with_ymd_and_hms(2026, 10, 20, 9, 30, 45).unwrap();
-        let entry = TimeEntry { project_id: 1, start, end, note: None };
+        let entry = TimeEntry { project_id: 1, start, end, ..Default::default() };
 
         let mut editor = EntryEditor::edit(0, &entry);
         assert_eq!(editor.build().unwrap().duration(), end - start);

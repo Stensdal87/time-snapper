@@ -15,6 +15,7 @@ pub struct ExportRow {
     pub project: String,
     /// "", "Telefon" eller "Pause".
     pub kind: String,
+    pub description: String,
 }
 
 impl ExportRow {
@@ -29,6 +30,8 @@ pub struct SummaryRow {
     pub project: String,
     pub count: usize,
     pub duration: Duration,
+    /// Projektets forskellige noter i perioden.
+    pub notes: Vec<String>,
 }
 
 /// Afsluttede registreringer der startede fra og med `from` til og med `to`,
@@ -47,6 +50,7 @@ pub fn collect(data: &Data, from: NaiveDate, to: NaiveDate) -> Vec<ExportRow> {
                 customer: customer.map_or("?", |c| c.name.as_str()).to_owned(),
                 project: project.map_or("?", |p| p.name.as_str()).to_owned(),
                 kind: e.note.clone().unwrap_or_default(),
+                description: e.description.clone(),
             }
         })
         .collect();
@@ -58,17 +62,25 @@ pub fn collect(data: &Data, from: NaiveDate, to: NaiveDate) -> Vec<ExportRow> {
 pub fn summarize(rows: &[ExportRow]) -> Vec<SummaryRow> {
     let mut summary: Vec<SummaryRow> = Vec::new();
     for row in rows {
-        match summary.iter_mut().find(|s| s.customer == row.customer && s.project == row.project) {
-            Some(s) => {
-                s.count += 1;
-                s.duration += row.duration();
+        let i = match summary.iter().position(|s| s.customer == row.customer && s.project == row.project) {
+            Some(i) => i,
+            None => {
+                summary.push(SummaryRow {
+                    customer: row.customer.clone(),
+                    project: row.project.clone(),
+                    count: 0,
+                    duration: Duration::zero(),
+                    notes: Vec::new(),
+                });
+                summary.len() - 1
             }
-            None => summary.push(SummaryRow {
-                customer: row.customer.clone(),
-                project: row.project.clone(),
-                count: 1,
-                duration: row.duration(),
-            }),
+        };
+        let s = &mut summary[i];
+        s.count += 1;
+        s.duration += row.duration();
+        let note = row.description.trim();
+        if !note.is_empty() && !s.notes.iter().any(|n| n == note) {
+            s.notes.push(note.to_owned());
         }
     }
     summary.sort_by_key(|s| (s.customer.to_lowercase(), s.project.to_lowercase()));
@@ -87,7 +99,7 @@ pub fn to_csv(rows: &[ExportRow], content: CsvContent) -> String {
     let mut lines: Vec<Vec<String>> = Vec::new();
     match content {
         CsvContent::Entries => {
-            lines.push(header(&["Dato", "Start", "Slut", "Kunde", "Projekt", "Type", "Varighed", "Timer"]));
+            lines.push(header(&["Dato", "Start", "Slut", "Kunde", "Projekt", "Type", "Note", "Varighed", "Timer"]));
             for r in rows {
                 lines.push(vec![
                     r.start.format("%d-%m-%Y").to_string(),
@@ -96,13 +108,14 @@ pub fn to_csv(rows: &[ExportRow], content: CsvContent) -> String {
                     r.customer.clone(),
                     r.project.clone(),
                     r.kind.clone(),
+                    r.description.clone(),
                     format_duration(r.duration()),
                     decimal_hours(r.duration()),
                 ]);
             }
         }
         CsvContent::Summary => {
-            lines.push(header(&["Kunde", "Projekt", "Antal", "Varighed", "Timer"]));
+            lines.push(header(&["Kunde", "Projekt", "Antal", "Varighed", "Timer", "Noter"]));
             for s in summarize(rows) {
                 lines.push(vec![
                     s.customer,
@@ -110,6 +123,7 @@ pub fn to_csv(rows: &[ExportRow], content: CsvContent) -> String {
                     s.count.to_string(),
                     format_duration(s.duration),
                     decimal_hours(s.duration),
+                    s.notes.join("; "),
                 ]);
             }
         }
@@ -168,7 +182,7 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
 
     let sheet = workbook.add_worksheet();
     sheet.set_name("Registreringer")?;
-    write_header(sheet, &["Dato", "Start", "Slut", "Kunde", "Projekt", "Type", "Varighed", "Timer"], &header)?;
+    write_header(sheet, &["Dato", "Start", "Slut", "Kunde", "Projekt", "Type", "Note", "Varighed", "Timer"], &header)?;
     for (i, r) in rows.iter().enumerate() {
         let row = i as u32 + 1;
         sheet.write_datetime_with_format(row, 0, r.start.date_naive(), &date)?;
@@ -177,29 +191,30 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
         sheet.write_string(row, 3, &r.customer)?;
         sheet.write_string(row, 4, &r.project)?;
         sheet.write_string(row, 5, &r.kind)?;
-        sheet.write_number_with_format(row, 6, days(r.duration()), &duration)?;
-        sheet.write_number_with_format(row, 7, hours(r.duration()), &decimal)?;
+        sheet.write_string(row, 6, &r.description)?;
+        sheet.write_number_with_format(row, 7, days(r.duration()), &duration)?;
+        sheet.write_number_with_format(row, 8, hours(r.duration()), &decimal)?;
     }
     let last = rows.len() as u32;
     let total_row = last + 1;
     sheet.write_string_with_format(total_row, 0, "I alt", &total_label)?;
-    for col in 1..6 {
+    for col in 1..7 {
         sheet.write_blank(total_row, col, &total_label)?;
     }
-    sheet.write_formula_with_format(total_row, 6, format!("=SUM(G2:G{})", last + 1).as_str(), &total_duration)?;
-    sheet.write_formula_with_format(total_row, 7, format!("=SUM(H2:H{})", last + 1).as_str(), &total_decimal)?;
-    for (col, width) in [11, 7, 7, 22, 22, 9, 10, 8].into_iter().enumerate() {
+    sheet.write_formula_with_format(total_row, 7, format!("=SUM(H2:H{})", last + 1).as_str(), &total_duration)?;
+    sheet.write_formula_with_format(total_row, 8, format!("=SUM(I2:I{})", last + 1).as_str(), &total_decimal)?;
+    for (col, width) in [11, 7, 7, 22, 22, 9, 35, 10, 8].into_iter().enumerate() {
         sheet.set_column_width(col as u16, width)?;
     }
     sheet.set_freeze_panes(1, 0)?;
     if !rows.is_empty() {
-        sheet.autofilter(0, 0, last, 7)?;
+        sheet.autofilter(0, 0, last, 8)?;
     }
 
     let summary = summarize(rows);
     let sheet = workbook.add_worksheet();
     sheet.set_name("Summeret")?;
-    write_header(sheet, &["Kunde", "Projekt", "Antal", "Varighed", "Timer"], &header)?;
+    write_header(sheet, &["Kunde", "Projekt", "Antal", "Varighed", "Timer", "Noter"], &header)?;
     for (i, s) in summary.iter().enumerate() {
         let row = i as u32 + 1;
         sheet.write_string(row, 0, &s.customer)?;
@@ -207,6 +222,7 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
         sheet.write_number(row, 2, s.count as f64)?;
         sheet.write_number_with_format(row, 3, days(s.duration), &duration)?;
         sheet.write_number_with_format(row, 4, hours(s.duration), &decimal)?;
+        sheet.write_string(row, 5, s.notes.join("; "))?;
     }
     let last = summary.len() as u32;
     let total_row = last + 1;
@@ -215,7 +231,8 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
     sheet.write_formula_with_format(total_row, 2, format!("=SUM(C2:C{})", last + 1).as_str(), &total_label)?;
     sheet.write_formula_with_format(total_row, 3, format!("=SUM(D2:D{})", last + 1).as_str(), &total_duration)?;
     sheet.write_formula_with_format(total_row, 4, format!("=SUM(E2:E{})", last + 1).as_str(), &total_decimal)?;
-    for (col, width) in [22, 22, 7, 10, 8].into_iter().enumerate() {
+    sheet.write_blank(total_row, 5, &total_label)?;
+    for (col, width) in [22, 22, 7, 10, 8, 50].into_iter().enumerate() {
         sheet.set_column_width(col as u16, width)?;
     }
     sheet.set_freeze_panes(1, 0)?;
@@ -247,13 +264,19 @@ mod tests {
         let web = data.add_project(c, "Web");
         let app = data.add_project(c, "App");
         let at = |d: u32, h: u32, m: u32| Local.with_ymd_and_hms(2026, 10, d, h, m, 0).unwrap();
-        for (project_id, start, end, note) in [
-            (web, at(19, 8, 0), at(19, 9, 0), None),
-            (app, at(20, 8, 0), at(20, 8, 45), Some("Telefon")),
-            (web, at(20, 10, 0), at(20, 10, 30), None),
-            (web, at(21, 8, 0), at(21, 9, 0), None),
+        for (project_id, start, end, note, description) in [
+            (web, at(19, 8, 0), at(19, 9, 0), None, "Forside"),
+            (app, at(20, 8, 0), at(20, 8, 45), Some("Telefon"), ""),
+            (web, at(20, 10, 0), at(20, 10, 30), None, "Kontaktformular"),
+            (web, at(21, 8, 0), at(21, 9, 0), None, "Forside"),
         ] {
-            data.add_entry(TimeEntry { project_id, start, end, note: note.map(str::to_owned) });
+            data.add_entry(TimeEntry {
+                project_id,
+                start,
+                end,
+                note: note.map(str::to_owned),
+                description: description.to_owned(),
+            });
         }
         data
     }
@@ -279,6 +302,7 @@ mod tests {
         assert_eq!(summary[1].project, "Web");
         assert_eq!(summary[1].count, 3);
         assert_eq!(summary[1].duration, Duration::minutes(150));
+        assert_eq!(summary[1].notes, ["Forside", "Kontaktformular"], "hver note kun én gang");
     }
 
     #[test]
@@ -287,11 +311,12 @@ mod tests {
         let csv = to_csv(&rows, CsvContent::Entries);
         assert!(csv.starts_with('\u{feff}'));
         let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
-        assert_eq!(lines[0], "Dato;Start;Slut;Kunde;Projekt;Type;Varighed;Timer");
-        assert_eq!(lines[1], "20-10-2026;08:00;08:45;\"Kunde; \"\"A\"\"\";App;Telefon;0:45:00;0,75");
+        assert_eq!(lines[0], "Dato;Start;Slut;Kunde;Projekt;Type;Note;Varighed;Timer");
+        assert_eq!(lines[1], "20-10-2026;08:00;08:45;\"Kunde; \"\"A\"\"\";App;Telefon;;0:45:00;0,75");
+        assert_eq!(lines[2], "20-10-2026;10:00;10:30;\"Kunde; \"\"A\"\"\";Web;;Kontaktformular;0:30:00;0,50");
 
         let summary = to_csv(&rows, CsvContent::Summary);
-        assert!(summary.contains(";Web;1;0:30:00;0,50"));
+        assert!(summary.contains(";Web;1;0:30:00;0,50;Kontaktformular"));
     }
 
     #[test]

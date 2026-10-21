@@ -11,7 +11,7 @@ use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 use crate::entry_editor::{EditorAction, EntryEditor};
 use crate::export_dialog::ExportDialog;
 use crate::idle::{IdleEvent, IdleWatcher};
-use crate::data::{format_duration, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
+use crate::data::{format_duration, DayEntry, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
 const HEARTBEAT: StdDuration = StdDuration::from_secs(30);
@@ -226,6 +226,19 @@ impl TimeSnapperApp {
                 self.save();
             }
         });
+        if let Some(active) = &mut self.data.active {
+            ui.add_space(4.0);
+            let changed = ui
+                .add(
+                    egui::TextEdit::singleline(&mut active.description)
+                        .hint_text("📝 Note til denne tidstagning…")
+                        .desired_width(f32::INFINITY),
+                )
+                .changed();
+            if changed {
+                self.save();
+            }
+        }
         if on_call {
             ui.add_space(4.0);
             self.call_target_panel(ui);
@@ -499,7 +512,11 @@ impl TimeSnapperApp {
                         ui.end_row();
                         for (project_id, d) in &totals {
                             let count = entries.iter().filter(|e| e.entry.project_id == *project_id).count();
-                            ui.label(self.data.project_label(*project_id));
+                            let notes = day_notes(&entries, *project_id);
+                            let response = ui.label(self.data.project_label(*project_id));
+                            if !notes.is_empty() {
+                                response.on_hover_text(format!("Noter:\n• {}", notes.join("\n• ")));
+                            }
                             ui.label(RichText::new(format!("{count}×")).weak())
                                 .on_hover_text(format!("{count} registreringer"));
                             ui.label(RichText::new(format_duration(*d)).monospace());
@@ -542,29 +559,35 @@ impl TimeSnapperApp {
                             if let Some(note) = &e.note {
                                 label = format!("{label} ({note})");
                             }
-                            match day_entry.index {
-                                Some(index) => {
-                                    let response = ui.selectable_label(false, label).on_hover_text("Klik for at rette");
-                                    if response.clicked() {
-                                        open_editor = Some(EntryEditor::edit(index, e));
-                                    }
-                                    response.context_menu(|ui| {
-                                        if ui.button("✏ Ret…").clicked() {
+                            ui.vertical(|ui| {
+                                match day_entry.index {
+                                    Some(index) => {
+                                        let response = ui.selectable_label(false, label).on_hover_text("Klik for at rette");
+                                        if response.clicked() {
                                             open_editor = Some(EntryEditor::edit(index, e));
-                                            ui.close();
                                         }
-                                        if ui.button("🗑 Slet…").clicked() {
-                                            open_editor = Some(EntryEditor::delete(index, e));
-                                            ui.close();
-                                        }
-                                    });
+                                        response.context_menu(|ui| {
+                                            if ui.button("✏ Ret…").clicked() {
+                                                open_editor = Some(EntryEditor::edit(index, e));
+                                                ui.close();
+                                            }
+                                            if ui.button("🗑 Slet…").clicked() {
+                                                open_editor = Some(EntryEditor::delete(index, e));
+                                                ui.close();
+                                            }
+                                        });
+                                    }
+                                    // Den kørende timer kan ikke rettes, før den er stoppet.
+                                    None => {
+                                        ui.label(RichText::new(format!("▶ {label}")).color(ACCENT))
+                                            .on_hover_text("Kører stadig. Stop timeren for at rette den.");
+                                    }
                                 }
-                                // Den kørende timer kan ikke rettes, før den er stoppet.
-                                None => {
-                                    ui.label(RichText::new(format!("▶ {label}")).color(ACCENT))
-                                        .on_hover_text("Kører stadig. Stop timeren for at rette den.");
+                                if !e.description.is_empty() {
+                                    ui.label(RichText::new(format!("📝 {}", shorten(&e.description, 40))).weak().small())
+                                        .on_hover_text(&e.description);
                                 }
-                            }
+                            });
                             ui.label(
                                 RichText::new(format!("{}–{}", e.start.format("%H:%M"), e.end.format("%H:%M")))
                                     .monospace()
@@ -1157,4 +1180,25 @@ fn matching_projects<'a>(data: &'a Data, customer: &Customer, query: &str) -> Op
     }
     let hits: Vec<_> = projects.filter(|p| p.name.to_lowercase().contains(&query)).collect();
     (!hits.is_empty()).then_some(hits)
+}
+
+/// Forkorter en tekst til højst `max` tegn med "…" til sidst.
+fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let cut: String = text.chars().take(max - 1).collect();
+    format!("{}…", cut.trim_end())
+}
+
+/// Dagens forskellige noter på et projekt, i den rækkefølge de blev skrevet.
+fn day_notes(entries: &[DayEntry], project_id: Id) -> Vec<String> {
+    let mut notes: Vec<String> = Vec::new();
+    for e in entries.iter().filter(|e| e.entry.project_id == project_id) {
+        let note = e.entry.description.trim();
+        if !note.is_empty() && !notes.iter().any(|n| n == note) {
+            notes.push(note.to_owned());
+        }
+    }
+    notes
 }
