@@ -175,6 +175,25 @@ pub struct Data {
     /// Vinduets indre placering (skærmpunkter) da det sidst blev lukket.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_pos: Option<[f32; 2]>,
+    /// Projekter hvis afrundede tid en given dag er rundet ned manuelt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub round_down: Vec<RoundDown>,
+}
+
+/// Et manuelt valg om at runde et projekts tid en bestemt dag ned i stedet for op.
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct RoundDown {
+    pub date: NaiveDate,
+    pub project_id: Id,
+}
+
+/// Et projekts tid en dag, afrundet til kvarter.
+pub struct Rounded {
+    pub time: Duration,
+    /// Rundet ned manuelt i stedet for op.
+    pub down: bool,
+    /// Om op og ned giver forskellige tider (ellers er der intet at vælge).
+    pub can_toggle: bool,
 }
 
 impl Data {
@@ -579,6 +598,29 @@ impl Data {
         finished + running
     }
 
+    /// Afrundet tid for et projekt en dag: op til nærmeste kvarter, eller ned
+    /// hvis det er valgt manuelt.
+    pub fn rounded(&self, date: NaiveDate, project_id: Id, time: Duration) -> Rounded {
+        let (up, down) = (round_up_quarter(time), round_down_quarter(time));
+        let chosen_down = self.round_down.contains(&RoundDown { date, project_id });
+        Rounded {
+            time: if chosen_down { down } else { up },
+            down: chosen_down && up != down,
+            can_toggle: up != down,
+        }
+    }
+
+    /// Skifter mellem at runde projektets tid den dag op eller ned.
+    pub fn toggle_round_down(&mut self, date: NaiveDate, project_id: Id) {
+        let item = RoundDown { date, project_id };
+        match self.round_down.iter().position(|r| *r == item) {
+            Some(i) => {
+                self.round_down.remove(i);
+            }
+            None => self.round_down.push(item),
+        }
+    }
+
     /// Samlet tid pr. projekt på en dag, sorteret efter mest tid først.
     pub fn totals_on(&self, date: NaiveDate) -> Vec<(Id, Duration)> {
         let mut totals: Vec<(Id, Duration)> = Vec::new();
@@ -596,6 +638,25 @@ impl Data {
 /// Navne sammenlignes uden hensyn til store/små bogstaver (også æ, ø, å).
 fn same_name(a: &str, b: &str) -> bool {
     a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+/// Runder op til nærmeste påbegyndte kvarter. Hele kvarterer og nul ændres ikke.
+pub fn round_up_quarter(d: Duration) -> Duration {
+    let quarter = 15 * 60;
+    let secs = d.num_seconds().max(0);
+    Duration::seconds((secs + quarter - 1) / quarter * quarter)
+}
+
+/// Runder ned til nærmeste hele kvarter.
+pub fn round_down_quarter(d: Duration) -> Duration {
+    let quarter = 15 * 60;
+    Duration::seconds(d.num_seconds().max(0) / quarter * quarter)
+}
+
+/// Timer og minutter, f.eks. "1:15".
+pub fn format_hours_minutes(d: Duration) -> String {
+    let mins = d.num_minutes().max(0);
+    format!("{}:{:02}", mins / 60, mins % 60)
 }
 
 pub fn format_duration(d: Duration) -> String {
@@ -814,6 +875,41 @@ mod tests {
         data.toggle_pause();
         assert!(data.active.is_none());
         assert_eq!(data.entries.len(), 1);
+    }
+
+    #[test]
+    fn rounds_up_to_next_quarter() {
+        let r = |secs| round_up_quarter(Duration::seconds(secs)).num_minutes();
+        assert_eq!(r(0), 0);
+        assert_eq!(r(1), 15);
+        assert_eq!(r(15 * 60), 15);
+        assert_eq!(r(15 * 60 + 1), 30);
+        assert_eq!(r(47 * 60), 60);
+        assert_eq!(r(61 * 60), 75);
+        assert_eq!(format_hours_minutes(Duration::minutes(75)), "1:15");
+    }
+
+    #[test]
+    fn rounding_can_be_toggled_down_per_project_and_day() {
+        let mut data = Data::default();
+        let day = NaiveDate::from_ymd_opt(2026, 10, 21).unwrap();
+        let other_day = day.succ_opt().unwrap();
+        let just_over = Duration::seconds(60 * 60 + 1);
+
+        assert_eq!(data.rounded(day, 1, just_over).time, Duration::minutes(75));
+        data.toggle_round_down(day, 1);
+        let r = data.rounded(day, 1, just_over);
+        assert_eq!(r.time, Duration::minutes(60));
+        assert!(r.down);
+        assert_eq!(data.rounded(other_day, 1, just_over).time, Duration::minutes(75), "kun den ene dag");
+        assert_eq!(data.rounded(day, 2, just_over).time, Duration::minutes(75), "kun det ene projekt");
+
+        let exact = data.rounded(day, 1, Duration::minutes(60));
+        assert!(!exact.can_toggle && !exact.down, "præcis et kvarter kan ikke rundes");
+
+        data.toggle_round_down(day, 1);
+        assert_eq!(data.rounded(day, 1, just_over).time, Duration::minutes(75));
+        assert!(data.round_down.is_empty());
     }
 
     #[test]

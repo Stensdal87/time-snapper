@@ -10,7 +10,7 @@ use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 
 use crate::entry_editor::{EditorAction, EntryEditor};
 use crate::export_dialog::ExportDialog;
-use crate::data::{format_duration, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
+use crate::data::{format_duration, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
 const HEARTBEAT: StdDuration = StdDuration::from_secs(30);
@@ -462,17 +462,54 @@ impl TimeSnapperApp {
         let totals = self.data.totals_on(self.history_date);
         let day_total = totals.iter().fold(Duration::zero(), |sum, (_, d)| sum + *d);
         let mut open_editor = None;
+        let mut toggle_rounding = None;
+        let date = self.history_date;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("history").striped(true).show(ui, |ui| {
                 match self.history_view {
                     HistoryView::Summary => {
+                        ui.label("");
+                        ui.label("");
+                        ui.label(RichText::new("Tid").weak().small());
+                        ui.label(RichText::new("Afrundet").weak().small())
+                            .on_hover_text("Rundet op til nærmeste påbegyndte kvarter");
+                        ui.end_row();
                         for (project_id, d) in &totals {
                             let count = entries.iter().filter(|e| e.entry.project_id == *project_id).count();
                             ui.label(self.data.project_label(*project_id));
                             ui.label(RichText::new(format!("{count}×")).weak())
                                 .on_hover_text(format!("{count} registreringer"));
                             ui.label(RichText::new(format_duration(*d)).monospace());
+                            // Klik på den afrundede tid for at runde ned i stedet for op.
+                            let r = self.data.rounded(date, *project_id, *d);
+                            let mut text = RichText::new(format_hours_minutes(r.time)).monospace();
+                            if r.down {
+                                text = RichText::new(format!("{} ↓", format_hours_minutes(r.time)))
+                                    .monospace()
+                                    .color(ui.visuals().warn_fg_color);
+                            }
+                            let hover = match (r.can_toggle, r.down) {
+                                (false, _) => "Præcis på et kvarter".to_owned(),
+                                (true, false) => format!(
+                                    "Rundet op fra {}. Klik for at runde ned til {}",
+                                    format_duration(*d),
+                                    format_hours_minutes(round_down_quarter(*d))
+                                ),
+                                (true, true) => format!(
+                                    "Rundet ned manuelt fra {}. Klik for at runde op til {}",
+                                    format_duration(*d),
+                                    format_hours_minutes(round_up_quarter(*d))
+                                ),
+                            };
+                            if r.can_toggle {
+                                let response = ui.add(egui::Button::new(text).frame(false)).on_hover_text(hover);
+                                if response.clicked() {
+                                    toggle_rounding = Some(*project_id);
+                                }
+                            } else {
+                                ui.label(text).on_hover_text(hover);
+                            }
                             ui.end_row();
                         }
                     }
@@ -519,12 +556,24 @@ impl TimeSnapperApp {
                 ui.label(RichText::new("I alt").strong());
                 ui.label("");
                 ui.label(RichText::new(format_duration(day_total)).monospace().strong());
+                if self.history_view == HistoryView::Summary {
+                    // Summen af de afrundede projekttider, som når der faktureres pr. projekt.
+                    let rounded = totals
+                        .iter()
+                        .fold(Duration::zero(), |sum, (id, d)| sum + self.data.rounded(date, *id, *d).time);
+                    ui.label(RichText::new(format_hours_minutes(rounded)).monospace().strong())
+                        .on_hover_text("Summen af de afrundede tider pr. projekt");
+                }
                 ui.end_row();
             });
         });
 
         if open_editor.is_some() {
             self.editor = open_editor;
+        }
+        if let Some(project_id) = toggle_rounding {
+            self.data.toggle_round_down(date, project_id);
+            self.save();
         }
     }
 
