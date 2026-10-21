@@ -174,12 +174,26 @@ impl TimeSnapperApp {
                 self.data.start_call();
                 self.save();
             }
+            let (pause_text, pause_hover) = if on_pause {
+                match self.data.pause_resume_project() {
+                    Some(id) => ("▶ Fortsæt".to_owned(), format!("Afslut pausen og fortsæt på {}", self.data.project_label(id))),
+                    None => ("☕ Afslut pause".to_owned(), "Afslut pausen og stop tiden".to_owned()),
+                }
+            } else {
+                ("☕ Pause".to_owned(), "Registreres på Intern tid. Tryk igen for at fortsætte, hvor du slap.".to_owned())
+            };
+            // Almindelig knap som de andre; markeret mens pausen kører.
+            let pause_button = if on_pause {
+                egui::Button::selectable(true, pause_text)
+            } else {
+                egui::Button::new(pause_text)
+            };
             if cols[1]
-                .add_enabled(!on_pause, egui::Button::new("☕ Pause").min_size(size.into()))
-                .on_hover_text("Registreres på Intern tid")
+                .add(pause_button.min_size(size.into()))
+                .on_hover_text(pause_hover)
                 .clicked()
             {
-                self.data.start_pause();
+                self.data.toggle_pause();
                 self.save();
             }
             if cols[2]
@@ -364,7 +378,7 @@ impl TimeSnapperApp {
                     (Some(note), Some(_)) => format!("{label} ({note})"),
                     _ => label,
                 };
-                (Local::now() - a.start, label, total)
+                (a.elapsed(), label, total)
             }
             None => (Duration::zero(), String::new(), None),
         };

@@ -8,7 +8,7 @@ Det kan ligge øverst på skærmen uden at være i vejen.
 - Kunder og projekter. Klik på et projekt for at starte tiden, og når du skifter projekt, gemmes tiden automatisk
 - Rundt ur der tæller op og viser både den aktuelle tidstagning og den samlede tid på projektet
 - **📞 Telefon**: start tid på et opkald og vælg kunde/projekt under eller efter opkaldet
-- **☕ Pause**: registreres automatisk på "Intern tid"
+- **☕ Pause**: registreres automatisk på "Intern tid". Tryk igen for at fortsætte på projektet fra før pausen
 - Historik pr. dag, enten summeret pr. projekt eller med alle registreringer
 - Ret, slet og tilføj registreringer, og omdøb kunder og projekter
 - Eksportér en periode til Excel (.xlsx) eller CSV
