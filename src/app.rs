@@ -90,6 +90,8 @@ pub struct TimeSnapperApp {
     window_visible: bool,
     /// Sat når programmet afsluttes fra systembakken, så lukning ikke skjuler vinduet.
     quitting: bool,
+    /// Om programmet starter, når man logger på. Læses fra systemet ved opstart.
+    autostart: bool,
 }
 
 /// En periode hvor brugeren var væk, mens der kørte tid på et projekt.
@@ -136,6 +138,10 @@ impl TimeSnapperApp {
             tray: Tray::start(ctx),
             window_visible: true,
             quitting: false,
+            autostart: {
+                crate::autostart::migrate_old_shortcut();
+                crate::autostart::is_enabled()
+            },
         };
         ctx.set_theme(app.data.theme.to_egui());
         if app.error.is_none() {
@@ -1156,6 +1162,16 @@ impl TimeSnapperApp {
             self.data.theme = theme;
             ctx.set_theme(theme.to_egui());
             self.save();
+        }
+        ui.add_space(14.0);
+
+        ui.label(RichText::new("Start").strong());
+        let mut autostart = self.autostart;
+        if ui.checkbox(&mut autostart, "Start Time Snapper, når jeg logger på").changed() {
+            if let Err(e) = crate::autostart::set_enabled(autostart) {
+                self.error = Some(e);
+            }
+            self.autostart = crate::autostart::is_enabled();
         }
         ui.add_space(14.0);
 

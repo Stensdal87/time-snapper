@@ -1,6 +1,6 @@
-# Bygger Windows-installeren og opretter en GitHub-release, når der pushes et
-# versions-tag, f.eks.:  git tag v0.1.0 && git push origin v0.1.0
-name: Windows-release
+# Bygger Windows-installeren og Linux-pakken og opretter en GitHub-release,
+# når der pushes et versions-tag, f.eks.:  git tag v0.3.0 && git push origin v0.3.0
+name: Release
 
 on:
   push:
@@ -35,14 +35,57 @@ jobs:
           Copy-Item target\release\time_snapper.exe "dist\TimeSnapper-portable-$version.exe"
           Get-ChildItem dist
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.exe
+
+  linux:
+    # Ældre Ubuntu giver en ældre glibc, så programmet også kører på ældre distributioner.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Byg
+        run: cargo build --release --locked
+
+      - name: Pak
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="TimeSnapper-$version-linux-x86_64"
+          mkdir -p "dist/$name"
+          install -m755 target/release/time_snapper "dist/$name/time-snapper"
+          install -m644 assets/icon.png "dist/$name/time-snapper.png"
+          install -m755 installer/linux/install.sh installer/linux/uninstall.sh "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*.tar.gz
+
+  release:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Opret release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          $notes = @"
-          ## Installation
+          version="${GITHUB_REF_NAME#v}"
+          cat > notes.md <<EOF
+          ## Windows
 
           Hent **TimeSnapper-Setup-$version.exe** og kør den. Den installerer kun for din bruger, så der kræves ikke administratorrettigheder.
 
@@ -50,6 +93,20 @@ jobs:
 
           Programmet er ikke kodesigneret, så Windows SmartScreen kan advare første gang: vælg **Flere oplysninger → Kør alligevel**.
 
-          Data gemmes i ``%APPDATA%\TimeSnapper\`` og bliver liggende ved opdatering og afinstallation.
-          "@
-          gh release create "${{ github.ref_name }}" dist\*.exe --title "Time Snapper $version" --notes $notes
+          ## Linux
+
+          Hent **TimeSnapper-$version-linux-x86_64.tar.gz**, pak den ud og kør installationsscriptet:
+
+          \`\`\`sh
+          tar xzf TimeSnapper-$version-linux-x86_64.tar.gz
+          cd TimeSnapper-$version-linux-x86_64
+          ./install.sh
+          \`\`\`
+
+          Det installerer for din bruger (uden root) i \`~/.local/bin\` med en genvej i programmenuen. Kør \`install.sh\` fra en ny version for at opdatere, og \`uninstall.sh\` for at fjerne programmet.
+
+          ## Data
+
+          Data gemmes i \`%APPDATA%\\TimeSnapper\\\` på Windows og \`~/.local/share/timesnapper/\` på Linux og bliver liggende ved opdatering og afinstallation.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Time Snapper $version" --notes-file notes.md

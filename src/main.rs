@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod autostart;
 mod data;
 mod entry_editor;
 mod export;
@@ -26,6 +27,13 @@ fn main() -> eframe::Result {
     };
     // Wayland lader ikke programmer lægge sig øverst, så på Linux kører vi via
     // X11/XWayland, hvor vinduesmanageren respekterer det.
+    // Linux: app-id'et kobler vinduet til timesnapper.desktop (ikon i proceslinjen).
+    // Det bestemmer også eframes gemmemappe; "timesnapper" giver den samme som før.
+    #[cfg(target_os = "linux")]
+    let options = eframe::NativeOptions {
+        viewport: options.viewport.with_app_id("timesnapper"),
+        ..options
+    };
     #[cfg(target_os = "linux")]
     let options = eframe::NativeOptions {
         event_loop_builder: Some(Box::new(|builder| {

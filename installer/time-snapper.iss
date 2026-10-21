@@ -32,6 +32,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Luk et kørende Time Snapper ved opdatering.
 CloseApplications=yes
+; Husk ikke valgene fra sidste installation: automatisk start styres inde i
+; programmet, og en opdatering må ikke slå den til igen.
+UsePreviousTasks=no
 
 [Languages]
 Name: "danish"; MessagesFile: "compiler:Languages\Danish.isl"
@@ -46,7 +49,24 @@ Source: "..\target\release\time_snapper.exe"; DestDir: "{app}"; DestName: "TimeS
 [Icons]
 Name: "{autoprograms}\Time Snapper"; Filename: "{app}\TimeSnapper.exe"
 Name: "{autodesktop}\Time Snapper"; Filename: "{app}\TimeSnapper.exe"; Tasks: desktopicon
-Name: "{userstartup}\Time Snapper"; Filename: "{app}\TimeSnapper.exe"; Tasks: autostart
+
+; Automatisk start ved logon. Programmet selv slår den til og fra samme sted
+; (☰ Indstillinger → Start), så de to altid er enige.
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Time Snapper"; ValueData: """{app}\TimeSnapper.exe"""; Tasks: autostart
+
+; Version 0.1 og 0.2 lagde en genvej i Start-mappen. Programmet flytter den selv
+; over til værdien ovenfor ved første start (autostart::migrate_old_shortcut).
+[UninstallDelete]
+Type: files; Name: "{userstartup}\Time Snapper.lnk"
 
 [Run]
 Filename: "{app}\TimeSnapper.exe"; Description: "{cm:LaunchProgram,Time Snapper}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// Fjern automatisk start ved afinstallation, også hvis den er slået til inde i programmet.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Time Snapper');
+end;

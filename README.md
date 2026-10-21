@@ -16,6 +16,7 @@ Det kan ligge øverst på skærmen uden at være i vejen.
 - Søgning i kunder og projekter, og højreklik for at udfolde/sammenklappe alle eller slette
 - Spørger om tiden skal være pause, når du har været væk fra computeren (indstilles i ☰-menuen)
 - Ikon i systembakken: start, skift projekt, pause og stop uden at vise vinduet
+- Kan starte automatisk, når du logger på (slås til/fra i ☰-menuen)
 - Lyst/mørkt tema, "hold øverst", og programmet husker vinduets størrelse og placering
 
 ## Byg og kør
@@ -27,6 +28,13 @@ cargo run --release
 ```
 
 Programmet er skrevet med [egui](https://github.com/emilk/egui) og er lavet til at kunne køre på både Linux og Windows.
+
+## Installation
+
+Hent den nyeste version under [Releases](https://github.com/Stensdal87/time-snapper/releases):
+
+- **Windows:** `TimeSnapper-Setup-<version>.exe` (installerer for din bruger, uden administratorrettigheder)
+- **Linux:** `TimeSnapper-<version>-linux-x86_64.tar.gz`. Pak den ud og kør `./install.sh` (installerer for din bruger i `~/.local/bin`, uden root)
 
 ## Data
 
