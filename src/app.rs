@@ -11,6 +11,7 @@ use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 use crate::entry_editor::{EditorAction, EntryEditor};
 use crate::export_dialog::ExportDialog;
 use crate::idle::{IdleEvent, IdleWatcher};
+use crate::tray::{Tray, TrayAction, TrayProject, TrayState};
 use crate::data::{format_duration, DayEntry, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
@@ -84,6 +85,11 @@ pub struct TimeSnapperApp {
     away_handled_until: DateTime<Local>,
     /// Spørgsmålet "skal tiden være pause?", når brugeren er kommet tilbage.
     away_prompt: Option<AwayPrompt>,
+    /// Ikonet i systembakken; `None` hvis systemet ikke har en.
+    tray: Option<Tray>,
+    window_visible: bool,
+    /// Sat når programmet afsluttes fra systembakken, så lukning ikke skjuler vinduet.
+    quitting: bool,
 }
 
 /// En periode hvor brugeren var væk, mens der kørte tid på et projekt.
@@ -127,6 +133,9 @@ impl TimeSnapperApp {
             away_since: None,
             away_handled_until: Local::now(),
             away_prompt: None,
+            tray: Tray::start(ctx),
+            window_visible: true,
+            quitting: false,
         };
         ctx.set_theme(app.data.theme.to_egui());
         if app.error.is_none() {
@@ -637,15 +646,46 @@ impl TimeSnapperApp {
 }
 
 impl eframe::App for TimeSnapperApp {
+    /// Kaldes før hver `ui` og også mens vinduet er skjult i systembakken, så
+    /// timeren, systembakken og "væk"-registreringen virker uden vinduet.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_tray_actions(ctx);
+        self.handle_idle_events();
+
+        if let Some(active) = &mut self.data.active {
+            if self.last_heartbeat.elapsed() >= HEARTBEAT {
+                active.last_seen = Local::now();
+                self.last_heartbeat = Instant::now();
+                self.save();
+            }
+            // Holder systembakkens status opdateret, også når vinduet er skjult.
+            ctx.request_repaint_after(StdDuration::from_secs(1));
+        }
+
+        let pending = self.data.unassigned.len();
+        if pending > self.seen_unassigned {
+            self.call_dialog_open = true;
+        }
+        self.seen_unassigned = pending;
+
+        // Et spørgsmål skal kunne ses: vis vinduet, hvis det er skjult.
+        let needs_answer = self.away_prompt.is_some() || (self.call_dialog_open && pending > 0);
+        if needs_answer && !self.window_visible {
+            self.show_window(ctx);
+        }
+        self.update_tray();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        // Luk den kørende timer pænt, når vinduet lukkes.
         if ctx.input(|i| i.viewport().close_requested()) {
-            self.data.stop();
-            if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
-                self.data.window_pos = Some([rect.min.x, rect.min.y]);
+            if self.tray.is_some() && self.data.settings.close_to_tray && !self.quitting {
+                // Luk til systembakken: tiden kører videre.
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.hide_window(&ctx);
+            } else if !self.quitting {
+                self.prepare_quit(&ctx);
             }
-            self.save();
         }
 
         // På X11 går "hold øverst" tabt, hvis det sættes før vinduet er vist,
@@ -661,12 +701,7 @@ impl eframe::App for TimeSnapperApp {
             }
         }
 
-        if let Some(active) = &mut self.data.active {
-            if self.last_heartbeat.elapsed() >= HEARTBEAT {
-                active.last_seen = Local::now();
-                self.last_heartbeat = Instant::now();
-                self.save();
-            }
+        if self.data.active.is_some() {
             ctx.request_repaint_after(StdDuration::from_millis(250));
         }
 
@@ -714,19 +749,13 @@ impl eframe::App for TimeSnapperApp {
             Tab::History => self.history_tab(ui),
         });
 
-        let pending = self.data.unassigned.len();
-        if pending > self.seen_unassigned {
-            self.call_dialog_open = true;
-        }
-        self.seen_unassigned = pending;
-        if self.call_dialog_open && pending > 0 {
+        if self.call_dialog_open && !self.data.unassigned.is_empty() {
             self.call_dialog(&ctx);
         }
         if let Some(target) = self.confirm_delete {
             self.delete_dialog(&ctx, target);
         }
         self.entry_editor(&ctx);
-        self.handle_idle_events();
         self.away_dialog(&ctx);
         self.rename_dialog(&ctx);
         if let Some(export) = self.export.as_mut()
@@ -1005,6 +1034,112 @@ impl TimeSnapperApp {
 }
 
 impl TimeSnapperApp {
+    fn show_window(&mut self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        self.window_visible = true;
+        // Når vinduet vises igen, går "hold øverst" og placeringen tabt på X11;
+        // sæt dem igen efter et øjeblik, som ved opstart.
+        self.started = Instant::now();
+        self.window_level_applied = false;
+        ctx.request_repaint();
+    }
+
+    fn hide_window(&mut self, ctx: &egui::Context) {
+        if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
+            self.data.window_pos = Some([rect.min.x, rect.min.y]);
+            self.save();
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        self.window_visible = false;
+    }
+
+    /// Stopper timeren og gemmer, inden programmet lukker.
+    fn prepare_quit(&mut self, ctx: &egui::Context) {
+        self.quitting = true;
+        self.data.stop();
+        if self.window_visible
+            && let Some(rect) = ctx.input(|i| i.viewport().inner_rect)
+        {
+            self.data.window_pos = Some([rect.min.x, rect.min.y]);
+        }
+        self.save();
+    }
+
+    fn handle_tray_actions(&mut self, ctx: &egui::Context) {
+        let Some(tray) = &self.tray else { return };
+        for action in tray.poll() {
+            match action {
+                TrayAction::Toggle if self.window_visible => self.hide_window(ctx),
+                TrayAction::Toggle => self.show_window(ctx),
+                TrayAction::Start(id) => self.data.start(id),
+                TrayAction::Call => self.data.start_call(),
+                TrayAction::Pause => self.data.toggle_pause(),
+                TrayAction::Stop => self.data.stop(),
+                TrayAction::Quit => {
+                    self.prepare_quit(ctx);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            self.save();
+        }
+    }
+
+    /// Beskriver systembakkens menu ud fra den aktuelle tilstand.
+    fn update_tray(&mut self) {
+        if self.tray.is_none() {
+            return;
+        }
+        let active = self.data.active.as_ref();
+        let active_project = active.and_then(|a| a.project_id);
+        let status = match active {
+            None => "Ingen tid kører".to_owned(),
+            Some(a) => {
+                let what = match a.project_id {
+                    Some(id) => self.data.project_label(id),
+                    None => "📞 Telefonopkald".to_owned(),
+                };
+                let what = match &a.note {
+                    Some(note) if a.project_id.is_some() => format!("{what} ({note})"),
+                    _ => what,
+                };
+                // Kun hele minutter, så menuen ikke bygges om hvert sekund.
+                format!("▶ {what} · {}", format_hours_minutes(a.elapsed()))
+            }
+        };
+        let on_pause = active.is_some_and(|a| a.is_note(NOTE_PAUSE));
+        let pause_label = match (on_pause, self.data.pause_resume_project()) {
+            (false, _) => "☕ Pause".to_owned(),
+            (true, Some(id)) => format!("▶ Fortsæt på {}", self.data.project_label(id)),
+            (true, None) => "☕ Afslut pause".to_owned(),
+        };
+        let customers = self
+            .data
+            .visible_customers()
+            .map(|c| {
+                let projects = self
+                    .data
+                    .visible_projects()
+                    .filter(|p| p.customer_id == c.id)
+                    .map(|p| TrayProject { id: p.id, name: p.name.clone(), active: active_project == Some(p.id) })
+                    .collect::<Vec<_>>();
+                (c.name.clone(), projects)
+            })
+            .filter(|(_, projects)| !projects.is_empty())
+            .collect();
+        let state = TrayState {
+            status,
+            running: active.is_some(),
+            on_call: active.is_some_and(|a| a.project_id.is_none()),
+            pause_label,
+            window_visible: self.window_visible,
+            customers,
+        };
+        if let Some(tray) = &mut self.tray {
+            tray.update(state);
+        }
+    }
+
     fn settings_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.add_space(6.0);
         ui.heading("Indstillinger");
@@ -1036,6 +1171,17 @@ impl TimeSnapperApp {
                 .weak()
                 .small(),
         );
+        if self.tray.is_some() {
+            ui.add_space(14.0);
+            ui.label(RichText::new("Systembakke").strong());
+            ui.checkbox(&mut settings.close_to_tray, "Luk til systembakken (tiden kører videre)");
+            ui.label(
+                RichText::new("Afslut helt via ikonet i systembakken. Venstreklik på ikonet viser vinduet.")
+                    .weak()
+                    .small(),
+            );
+        }
+
         if settings != self.data.settings {
             self.data.settings = settings;
             self.save();

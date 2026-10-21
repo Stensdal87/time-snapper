@@ -15,6 +15,7 @@ Det kan ligge øverst på skærmen uden at være i vejen.
 - Eksportér en periode til Excel (.xlsx) eller CSV
 - Søgning i kunder og projekter, og højreklik for at udfolde/sammenklappe alle eller slette
 - Spørger om tiden skal være pause, når du har været væk fra computeren (indstilles i ☰-menuen)
+- Ikon i systembakken: start, skift projekt, pause og stop uden at vise vinduet
 - Lyst/mørkt tema, "hold øverst", og programmet husker vinduets størrelse og placering
 
 ## Byg og kør

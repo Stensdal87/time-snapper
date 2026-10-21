@@ -7,6 +7,7 @@ mod entry_editor;
 mod export;
 mod export_dialog;
 mod idle;
+mod tray;
 
 use eframe::egui;
 
