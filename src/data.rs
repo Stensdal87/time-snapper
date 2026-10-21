@@ -292,8 +292,11 @@ impl Data {
     }
 
     /// Kunder der ikke er slettet.
+    /// Kunder der ikke er slettet: den interne kunde først, derefter alfabetisk.
     pub fn visible_customers(&self) -> impl Iterator<Item = &Customer> {
-        self.customers.iter().filter(|c| !c.deleted)
+        let mut customers: Vec<&Customer> = self.customers.iter().filter(|c| !c.deleted).collect();
+        customers.sort_by_cached_key(|c| (!self.is_internal_customer(c.id), sort_key(&c.name)));
+        customers.into_iter()
     }
 
     /// Projekter der ikke er slettet.
@@ -709,6 +712,22 @@ impl Data {
     }
 }
 
+/// Nøgle til alfabetisk sortering efter dansk alfabet: store og små bogstaver
+/// sorteres ens, og æ, ø, å kommer efter z i den rækkefølge (i Unicode ligger
+/// å før æ). "{", "|" og "}" kommer lige efter "z" i ASCII.
+fn sort_key(name: &str) -> String {
+    name.trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'æ' => '{',
+            'ø' => '|',
+            'å' => '}',
+            c => c,
+        })
+        .collect()
+}
+
 /// Navne sammenlignes uden hensyn til store/små bogstaver (også æ, ø, å).
 fn same_name(a: &str, b: &str) -> bool {
     a.trim().to_lowercase() == b.trim().to_lowercase()
@@ -1048,6 +1067,17 @@ mod tests {
         data.toggle_round_down(day, 1);
         assert_eq!(data.rounded(day, 1, just_over).time, Duration::minutes(75));
         assert!(data.round_down.is_empty());
+    }
+
+    #[test]
+    fn customers_are_sorted_with_internal_first() {
+        let mut data = Data::default();
+        for name in ["Øster", "beta", "Århus", "Alfa", "Ærø", "Zulu"] {
+            data.add_customer(name);
+        }
+        data.internal_project_id(); // opretter "Intern" sidst
+        let names: Vec<&str> = data.visible_customers().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Intern", "Alfa", "beta", "Zulu", "Ærø", "Øster", "Århus"]);
     }
 
     #[test]

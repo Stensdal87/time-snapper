@@ -426,7 +426,8 @@ impl TimeSnapperApp {
             }
             None => (Duration::zero(), String::new(), None),
         };
-        let secs = elapsed.num_milliseconds() as f32 / 1000.0;
+        // Hele sekunder, så prikken tikker i takt med sekundtallet i midten.
+        let secs = elapsed.num_seconds() as f32;
 
         if self.data.active.is_some() {
             let hour_fraction = (secs % 3600.0) / 3600.0;
@@ -701,8 +702,10 @@ impl eframe::App for TimeSnapperApp {
             }
         }
 
-        if self.data.active.is_some() {
-            ctx.request_repaint_after(StdDuration::from_millis(250));
+        // Tegn igen præcis når uret skifter sekund, så prikken tikker jævnt.
+        if let Some(active) = &self.data.active {
+            let into_second = active.elapsed().num_milliseconds().rem_euclid(1000) as u64;
+            ctx.request_repaint_after(StdDuration::from_millis(1000 - into_second + 5));
         }
 
         egui::Panel::top("tabs").show(ui, |ui| {
@@ -1103,8 +1106,7 @@ impl TimeSnapperApp {
                     Some(note) if a.project_id.is_some() => format!("{what} ({note})"),
                     _ => what,
                 };
-                // Kun hele minutter, så menuen ikke bygges om hvert sekund.
-                format!("▶ {what} · {}", format_hours_minutes(a.elapsed()))
+                format!("▶ {what} · {}", format_duration(a.elapsed()))
             }
         };
         let on_pause = active.is_some_and(|a| a.is_note(NOTE_PAUSE));

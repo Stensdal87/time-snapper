@@ -31,7 +31,8 @@ pub struct TrayProject {
 /// Alt hvad menuen viser. Menuen bygges kun om, når den ændrer sig.
 #[derive(Clone, PartialEq, Default)]
 pub struct TrayState {
-    /// Første linje i menuen og tooltip, f.eks. "▶ Kunde / Projekt · 0:45".
+    /// Første linje i menuen og tooltip, f.eks. "▶ Kunde / Projekt · 0:45:12".
+    /// Ændres hvert sekund, mens tiden kører.
     pub status: String,
     pub running: bool,
     pub on_call: bool,
@@ -202,6 +203,10 @@ mod platform {
 
     pub struct Inner {
         icon: TrayIcon,
+        /// Statuslinjen, så dens tekst kan opdateres uden at bygge menuen om.
+        status_item: MenuItem,
+        /// Menuen som den sidst blev bygget, uden statusteksten.
+        built: TrayState,
     }
 
     impl Inner {
@@ -229,23 +234,35 @@ mod platform {
             }));
 
             let icon = tray_icon::Icon::from_rgba(icon.rgba, icon.width, icon.height).ok()?;
+            let built = TrayState::default();
+            let (menu, status_item) = build_menu(&built);
             let icon = TrayIconBuilder::new()
                 .with_icon(icon)
                 .with_tooltip("Time Snapper")
-                .with_menu(Box::new(build_menu(&TrayState::default())))
+                .with_menu(Box::new(menu))
                 .with_menu_on_left_click(false)
                 .build()
                 .ok()?;
-            Some(Self { icon })
+            Some(Self { icon, status_item, built })
         }
 
-        pub fn update(&self, state: &TrayState) {
-            self.icon.set_menu(Some(Box::new(build_menu(state))));
+        pub fn update(&mut self, state: &TrayState) {
+            // Statusteksten ændres hvert sekund. At skifte hele menuen ud kan
+            // lukke en åben menu, så den bygges kun om, når andet end teksten ændres.
+            let structure = TrayState { status: String::new(), ..state.clone() };
+            if structure != self.built {
+                let (menu, status_item) = build_menu(state);
+                self.icon.set_menu(Some(Box::new(menu)));
+                self.status_item = status_item;
+                self.built = structure;
+            } else {
+                self.status_item.set_text(&state.status);
+            }
             let _ = self.icon.set_tooltip(Some(format!("Time Snapper\n{}", state.status)));
         }
     }
 
-    fn build_menu(s: &TrayState) -> Menu {
+    fn build_menu(s: &TrayState) -> (Menu, MenuItem) {
         let menu = Menu::new();
         let switch = Submenu::new("Skift projekt", true);
         for (customer, projects) in &s.customers {
@@ -257,7 +274,8 @@ mod platform {
             let _ = switch.append(&sub);
         }
         let toggle = if s.window_visible { "Skjul vinduet" } else { "Vis vinduet" };
-        let _ = menu.append(&MenuItem::with_id("status", &s.status, false, None));
+        let status_item = MenuItem::with_id("status", &s.status, false, None);
+        let _ = menu.append(&status_item);
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&switch);
         let _ = menu.append(&MenuItem::with_id("call", "📞 Telefon", !s.on_call, None));
@@ -266,7 +284,7 @@ mod platform {
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&MenuItem::with_id("toggle", toggle, true, None));
         let _ = menu.append(&MenuItem::with_id("quit", "Afslut Time Snapper", true, None));
-        menu
+        (menu, status_item)
     }
 }
 
@@ -281,6 +299,6 @@ mod platform {
             None
         }
 
-        pub fn update(&self, _: &TrayState) {}
+        pub fn update(&mut self, _: &TrayState) {}
     }
 }
