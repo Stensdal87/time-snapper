@@ -5,11 +5,12 @@ use std::f32::consts::TAU;
 use std::path::PathBuf;
 use std::time::{Duration as StdDuration, Instant};
 
-use chrono::{Duration, Local, NaiveDate};
+use chrono::{DateTime, Duration, Local, NaiveDate};
 use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 
 use crate::entry_editor::{EditorAction, EntryEditor};
 use crate::export_dialog::ExportDialog;
+use crate::idle::{IdleEvent, IdleWatcher};
 use crate::data::{format_duration, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
@@ -74,6 +75,22 @@ pub struct TimeSnapperApp {
     /// Åben dialog til at rette/tilføje en registrering.
     editor: Option<EntryEditor>,
     export: Option<ExportDialog>,
+    /// Indstillingsmenuen i venstre side.
+    settings_open: bool,
+    idle: IdleWatcher,
+    /// Hvornår brugeren gik fra computeren, mens vi venter på at de kommer tilbage.
+    away_since: Option<DateTime<Local>>,
+    /// Væk-perioder før dette tidspunkt er allerede besvaret.
+    away_handled_until: DateTime<Local>,
+    /// Spørgsmålet "skal tiden være pause?", når brugeren er kommet tilbage.
+    away_prompt: Option<AwayPrompt>,
+}
+
+/// En periode hvor brugeren var væk, mens der kørte tid på et projekt.
+struct AwayPrompt {
+    project_id: Id,
+    from: DateTime<Local>,
+    to: DateTime<Local>,
 }
 
 impl TimeSnapperApp {
@@ -105,6 +122,11 @@ impl TimeSnapperApp {
             rename: None,
             editor: None,
             export: None,
+            settings_open: false,
+            idle: IdleWatcher::start(ctx),
+            away_since: None,
+            away_handled_until: Local::now(),
+            away_prompt: None,
         };
         ctx.set_theme(app.data.theme.to_egui());
         if app.error.is_none() {
@@ -627,22 +649,13 @@ impl eframe::App for TimeSnapperApp {
 
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.toggle_value(&mut self.settings_open, "☰").on_hover_text("Indstillinger");
                 ui.selectable_value(&mut self.tab, Tab::Timer, "⏱ Timer");
                 // Historikken åbner altid i den summerede visning.
                 if ui.selectable_value(&mut self.tab, Tab::History, "📅 Historik").changed() {
                     self.history_view = HistoryView::Summary;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (icon, hover) = match self.data.theme {
-                        ThemeChoice::System => ("💻", "Tema: følger systemet"),
-                        ThemeChoice::Light => ("☀", "Tema: lyst"),
-                        ThemeChoice::Dark => ("🌙", "Tema: mørkt"),
-                    };
-                    if ui.button(icon).on_hover_text(format!("{hover} (klik for at skifte)")).clicked() {
-                        self.data.theme = self.data.theme.next();
-                        ctx.set_theme(self.data.theme.to_egui());
-                        self.save();
-                    }
                     if ui
                         .toggle_value(&mut self.always_on_top, "📌")
                         .on_hover_text("Hold vinduet øverst")
@@ -665,6 +678,14 @@ impl eframe::App for TimeSnapperApp {
             });
         }
 
+        let mut settings_open = self.settings_open;
+        egui::Panel::left("settings")
+            .resizable(false)
+            .drag_to_open(false)
+            .exact_size(210.0)
+            .show_collapsible(ui, &mut settings_open, |ui| self.settings_panel(ui, &ctx));
+        self.settings_open = settings_open;
+
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Timer => self.timer_tab(ui),
             Tab::History => self.history_tab(ui),
@@ -682,6 +703,8 @@ impl eframe::App for TimeSnapperApp {
             self.delete_dialog(&ctx, target);
         }
         self.entry_editor(&ctx);
+        self.handle_idle_events();
+        self.away_dialog(&ctx);
         self.rename_dialog(&ctx);
         if let Some(export) = self.export.as_mut()
             && !export.show(&ctx, &self.data, frame, self.always_on_top)
@@ -955,6 +978,140 @@ impl TimeSnapperApp {
         }
         let (customer, project) = (target.customer.trim(), target.project.trim());
         (!customer.is_empty() && !project.is_empty()).then(|| format!("{customer} / {project}"))
+    }
+}
+
+impl TimeSnapperApp {
+    fn settings_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.add_space(6.0);
+        ui.heading("Indstillinger");
+        ui.add_space(10.0);
+
+        ui.label(RichText::new("Tema").strong());
+        let mut theme = self.data.theme;
+        ui.radio_value(&mut theme, ThemeChoice::System, "💻 Følg systemet");
+        ui.radio_value(&mut theme, ThemeChoice::Light, "☀ Lyst");
+        ui.radio_value(&mut theme, ThemeChoice::Dark, "🌙 Mørkt");
+        if theme != self.data.theme {
+            self.data.theme = theme;
+            ctx.set_theme(theme.to_egui());
+            self.save();
+        }
+        ui.add_space(14.0);
+
+        ui.label(RichText::new("Væk fra computeren").strong());
+        let mut settings = self.data.settings.clone();
+        ui.checkbox(&mut settings.away_enabled, "Spørg om tiden skal være pause, når jeg har været væk");
+        ui.add_enabled_ui(settings.away_enabled, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Efter");
+                ui.add(egui::Slider::new(&mut settings.away_minutes, 5..=60).step_by(5.0).suffix(" min"));
+            });
+        });
+        ui.label(
+            RichText::new("Gælder når der kører tid på et projekt, og man ikke har rørt mus eller tastatur.")
+                .weak()
+                .small(),
+        );
+        if settings != self.data.settings {
+            self.data.settings = settings;
+            self.save();
+        }
+
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            ui.add_space(4.0);
+            ui.label(RichText::new(format!("Time Snapper {}", env!("CARGO_PKG_VERSION"))).weak().small());
+        });
+    }
+
+    fn handle_idle_events(&mut self) {
+        for event in self.idle.poll() {
+            match event {
+                IdleEvent::Away { since } => {
+                    if self.away_since.is_none_or(|s| since < s) {
+                        self.away_since = Some(since);
+                    }
+                }
+                IdleEvent::Back { at } => {
+                    if let Some(since) = self.away_since.take() {
+                        self.consider_away(since, at);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Spørg om pause, hvis brugeren har været væk længe nok, mens der kørte
+    /// tid på et projekt (ikke under en pause eller et opkald uden projekt).
+    fn consider_away(&mut self, since: DateTime<Local>, at: DateTime<Local>) {
+        let settings = &self.data.settings;
+        let Some(active) = &self.data.active else { return };
+        let Some(project_id) = active.project_id else { return };
+        if !settings.away_enabled || active.is_note(NOTE_PAUSE) {
+            return;
+        }
+        let from = since.max(active.start).max(self.away_handled_until);
+        if at - from < Duration::minutes(i64::from(settings.away_minutes)) {
+            return;
+        }
+        match &mut self.away_prompt {
+            // Flere meldinger om samme fravær (f.eks. både inaktivitet og dvale) slås sammen.
+            Some(prompt) if prompt.project_id == project_id => {
+                prompt.from = prompt.from.min(from);
+                prompt.to = prompt.to.max(at);
+            }
+            _ => self.away_prompt = Some(AwayPrompt { project_id, from, to: at }),
+        }
+    }
+
+    /// "Velkommen tilbage"-dialogen. Enter registrerer pause, Esc beholder tiden på projektet.
+    fn away_dialog(&mut self, ctx: &egui::Context) {
+        let Some(prompt) = &self.away_prompt else { return };
+        let (project_id, from, to) = (prompt.project_id, prompt.from, prompt.to);
+        let minutes = (to - from).num_minutes();
+        let length = if minutes < 60 {
+            format!("{minutes} min")
+        } else {
+            format!("{} t {:02} min", minutes / 60, minutes % 60)
+        };
+        let mut answer = None;
+
+        let modal = egui::Modal::new(egui::Id::unique("away_dialog")).show(ctx, |ui| {
+            ui.set_width(270.0);
+            ui.heading("👋 Velkommen tilbage");
+            ui.add_space(4.0);
+            ui.label(format!(
+                "Du har været væk fra computeren fra {} til {} ({length}).",
+                from.format("%H:%M"),
+                to.format("%H:%M")
+            ));
+            ui.label(format!("Imens kørte tiden på {}.", self.data.project_label(project_id)));
+            ui.add_space(4.0);
+            ui.label(RichText::new("Skal tiden registreres som pause?").strong());
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("☕ Ja, som pause").on_hover_text("Enter").clicked() {
+                    answer = Some(true);
+                }
+                if ui.button("Nej, behold på projektet").on_hover_text("Esc").clicked() {
+                    answer = Some(false);
+                }
+            });
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                answer = Some(true);
+            }
+        });
+        if answer.is_none() && modal.should_close() {
+            answer = Some(false);
+        }
+
+        if let Some(as_pause) = answer {
+            if as_pause && self.data.convert_to_pause(project_id, from, to) {
+                self.save();
+            }
+            self.away_handled_until = self.away_handled_until.max(to);
+            self.away_prompt = None;
+        }
     }
 }
 

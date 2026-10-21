@@ -3343,6 +3343,9 @@ dependencies = [
  "rust_xlsxwriter",
  "serde",
  "serde_json",
+ "wayland-client",
+ "wayland-protocols",
+ "windows-sys 0.61.2",
  "winit",
  "winresource",
 ]

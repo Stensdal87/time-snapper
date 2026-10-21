@@ -140,14 +140,6 @@ pub enum ThemeChoice {
 }
 
 impl ThemeChoice {
-    pub fn next(self) -> Self {
-        match self {
-            Self::System => Self::Light,
-            Self::Light => Self::Dark,
-            Self::Dark => Self::System,
-        }
-    }
-
     pub fn to_egui(self) -> eframe::egui::ThemePreference {
         use eframe::egui::ThemePreference;
         match self {
@@ -178,6 +170,24 @@ pub struct Data {
     /// Projekter hvis afrundede tid en given dag er rundet ned manuelt.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub round_down: Vec<RoundDown>,
+    #[serde(default)]
+    pub settings: Settings,
+}
+
+/// Brugerens indstillinger (menuen ☰).
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct Settings {
+    /// Spørg om tiden skal være pause, når man har været væk fra computeren.
+    pub away_enabled: bool,
+    /// Hvor mange minutter man skal have været væk, før der spørges.
+    pub away_minutes: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { away_enabled: true, away_minutes: 15 }
+    }
 }
 
 /// Et manuelt valg om at runde et projekts tid en bestemt dag ned i stedet for op.
@@ -419,6 +429,29 @@ impl Data {
             active.resume_project = Some(project_id);
             active.resume_secs = secs;
         }
+    }
+
+    /// Flytter tiden fra `from` til `to` fra den kørende timer over på pause.
+    /// Tiden før `from` gemmes på projektet, perioden bliver en pause, og timeren
+    /// kører videre på projektet fra `to`, mens uret fortsætter uden pausen.
+    /// Gør intet og returnerer false, hvis timeren ikke længere passer.
+    pub fn convert_to_pause(&mut self, project_id: Id, from: DateTime<Local>, to: DateTime<Local>) -> bool {
+        let Some(active) = self.active.clone() else { return false };
+        if active.project_id != Some(project_id) || active.is_note(NOTE_PAUSE) || from < active.start || to <= from {
+            return false;
+        }
+        let internal = self.internal_project_id();
+        let before = from - active.start;
+        if before >= Duration::seconds(1) {
+            self.entries.push(TimeEntry { project_id, start: active.start, end: from, note: active.note.clone() });
+        }
+        self.entries.push(TimeEntry { project_id: internal, start: from, end: to, note: Some(NOTE_PAUSE.to_owned()) });
+        if let Some(active) = &mut self.active {
+            active.start = to;
+            active.carried_secs += before.num_seconds();
+            active.last_seen = active.last_seen.max(to);
+        }
+        true
     }
 
     /// Projektet en kørende pause vender tilbage til, hvis det stadig findes.
@@ -865,6 +898,47 @@ mod tests {
         assert!(active.note.is_none());
         assert_eq!(data.entries.len(), 2, "projekttid og pause er gemt");
         assert_eq!(data.entries[1].note.as_deref(), Some(NOTE_PAUSE));
+    }
+
+    #[test]
+    fn away_time_can_be_converted_to_pause() {
+        let mut data = Data::default();
+        let c = data.add_customer("Kunde");
+        let p = data.add_project(c, "A");
+        let now = Local::now();
+        data.active = Some(ActiveTimer {
+            project_id: Some(p),
+            start: now - Duration::minutes(60),
+            last_seen: now,
+            note: None,
+            target: CallTarget::default(),
+            resume_project: None,
+            resume_secs: 0,
+            carried_secs: 0,
+        });
+        // Væk fra 40 til 10 minutter siden.
+        let (from, to) = (now - Duration::minutes(40), now - Duration::minutes(10));
+        assert!(data.convert_to_pause(p, from, to));
+
+        let internal = data.internal_project_id();
+        assert_eq!(data.entries.len(), 2);
+        assert_eq!(data.entries[0].project_id, p);
+        assert_eq!(data.entries[0].duration(), Duration::minutes(20));
+        assert_eq!(data.entries[1].project_id, internal);
+        assert_eq!(data.entries[1].duration(), Duration::minutes(30));
+        let active = data.active.as_ref().unwrap();
+        assert_eq!(active.project_id, Some(p));
+        assert_eq!(active.start, to);
+        assert_eq!(active.elapsed().num_minutes(), 30, "uret viser 20 + 10 min uden pausen");
+
+        assert!(!data.convert_to_pause(c + 100, from, to), "andet projekt end det der kører");
+    }
+
+    #[test]
+    fn settings_default_when_missing_from_file() {
+        let data: Data = serde_json::from_str(r#"{"next_id":0,"customers":[],"projects":[],"entries":[],"active":null}"#).unwrap();
+        assert!(data.settings.away_enabled);
+        assert_eq!(data.settings.away_minutes, 15);
     }
 
     #[test]
