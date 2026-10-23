@@ -183,6 +183,12 @@ pub struct Data {
     pub round_down: Vec<RoundDown>,
     #[serde(default)]
     pub settings: Settings,
+    /// Vinduet er foldet sammen til en lille bjælke.
+    #[serde(default)]
+    pub compact: bool,
+    /// Vinduets størrelse (skærmpunkter), før det blev foldet sammen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_size: Option<[f32; 2]>,
 }
 
 /// Brugerens indstillinger (menuen ☰).
@@ -545,7 +551,7 @@ impl Data {
 
     /// Projektet som et mål peger på. Indtastet kunde og projekt genbruges hvis
     /// de findes i forvejen (uanset store/små bogstaver), ellers oprettes de.
-    fn resolve_target(&mut self, target: &CallTarget) -> Option<Id> {
+    pub fn resolve_target(&mut self, target: &CallTarget) -> Option<Id> {
         if let Some(id) = target.project_id
             && self.project(id).is_some_and(|p| !p.deleted)
         {

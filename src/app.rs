@@ -1,5 +1,7 @@
 //! Brugerfladen.
 
+mod compact;
+
 use std::collections::HashMap;
 use std::f32::consts::TAU;
 use std::path::PathBuf;
@@ -12,6 +14,7 @@ use crate::entry_editor::{EditorAction, EntryEditor};
 use crate::export_dialog::ExportDialog;
 use crate::idle::{IdleEvent, IdleWatcher};
 use crate::tray::{Tray, TrayAction, TrayProject, TrayState};
+use compact::{PendingMove, ProjectPicker, WindowLayout};
 use crate::data::{format_duration, DayEntry, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
@@ -92,6 +95,18 @@ pub struct TimeSnapperApp {
     quitting: bool,
     /// Om programmet starter, når man logger på. Læses fra systemet ved opstart.
     autostart: bool,
+    /// Den visning vinduets størrelse sidst blev sat til.
+    layout: WindowLayout,
+    layout_applied: bool,
+    picker: Option<ProjectPicker>,
+    pending_move: Option<PendingMove>,
+    /// Hvor meget en flytning skal justeres, fordi vinduesmanageren lægger
+    /// titellinjen oveni (KWin/X11: ca. 28 px). Læres ved opstart og ved første
+    /// rettede flytning, så senere flytninger lander rigtigt med det samme.
+    move_correction: Vec2,
+    /// Om bjælken sidst voksede opad (bunden fast). Samme kant bruges, når den
+    /// folder sig sammen igen, så den vender tilbage til samme sted.
+    bar_anchor_bottom: Option<bool>,
 }
 
 /// En periode hvor brugeren var væk, mens der kørte tid på et projekt.
@@ -142,7 +157,18 @@ impl TimeSnapperApp {
                 crate::autostart::migrate_old_shortcut();
                 crate::autostart::is_enabled()
             },
+            layout: WindowLayout::Normal,
+            layout_applied: false,
+            picker: None,
+            pending_move: None,
+            move_correction: Vec2::ZERO,
+            bar_anchor_bottom: None,
         };
+        // Var vinduet foldet sammen ved sidste lukning, har det allerede den lille
+        // størrelse; den normale størrelse er gemt for sig.
+        if app.data.compact {
+            app.layout = WindowLayout::Bar;
+        }
         ctx.set_theme(app.data.theme.to_egui());
         if app.error.is_none() {
             app.save();
@@ -177,6 +203,11 @@ impl TimeSnapperApp {
         let Some(inner) = ctx.input(|i| i.viewport().inner_rect) else { return };
         let wanted = Pos2::new(x, y);
         let drift = wanted - inner.min;
+        // eframe bad om den gemte placering og fik den plus titellinjen: det er
+        // netop den justering, senere flytninger skal have.
+        if drift.length() > 1.0 && drift.length() < 100.0 {
+            self.move_correction = drift;
+        }
         if drift.length() > 1.0 {
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(wanted + drift));
         }
@@ -760,6 +791,46 @@ impl eframe::App for TimeSnapperApp {
             ctx.request_repaint_after(StdDuration::from_millis(1000 - into_second + 5));
         }
 
+        let layout = self.wanted_layout();
+        if self.window_level_applied && (!self.layout_applied || layout != self.layout) {
+            self.apply_layout(&ctx, frame, layout);
+        }
+        self.handle_pending_move(&ctx);
+        match layout {
+            WindowLayout::Normal => self.full_ui(ui, &ctx),
+            WindowLayout::Bar => {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 4)))
+                    .show(ui, |ui| self.compact_bar(ui));
+            }
+            WindowLayout::Picker => {
+                egui::Panel::top("compact_bar")
+                    .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 4)))
+                    .show(ui, |ui| self.compact_bar(ui));
+                egui::CentralPanel::default().show(ui, |ui| self.project_picker(ui));
+            }
+        }
+
+        if self.call_dialog_open && !self.data.unassigned.is_empty() {
+            self.call_dialog(&ctx);
+        }
+        if let Some(target) = self.confirm_delete {
+            self.delete_dialog(&ctx, target);
+        }
+        self.entry_editor(&ctx);
+        self.away_dialog(&ctx);
+        self.rename_dialog(&ctx);
+        if let Some(export) = self.export.as_mut()
+            && !export.show(&ctx, &self.data, frame, self.always_on_top)
+        {
+            self.export = None;
+        }
+    }
+}
+
+impl TimeSnapperApp {
+    /// Det fulde program: faner, indstillinger og Timer/Historik.
+    fn full_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut self.settings_open, "☰").on_hover_text("Indstillinger");
@@ -769,12 +840,16 @@ impl eframe::App for TimeSnapperApp {
                     self.history_view = HistoryView::Summary;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("🗕").on_hover_text("Fold sammen til en lille bjælke").clicked() {
+                        self.data.compact = true;
+                        self.save();
+                    }
                     if ui
                         .toggle_value(&mut self.always_on_top, "📌")
                         .on_hover_text("Hold vinduet øverst")
                         .changed()
                     {
-                        self.apply_window_level(&ctx);
+                        self.apply_window_level(ctx);
                     }
                 });
             });
@@ -796,28 +871,13 @@ impl eframe::App for TimeSnapperApp {
             .resizable(false)
             .drag_to_open(false)
             .exact_size(210.0)
-            .show_collapsible(ui, &mut settings_open, |ui| self.settings_panel(ui, &ctx));
+            .show_collapsible(ui, &mut settings_open, |ui| self.settings_panel(ui, ctx));
         self.settings_open = settings_open;
 
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Timer => self.timer_tab(ui),
             Tab::History => self.history_tab(ui),
         });
-
-        if self.call_dialog_open && !self.data.unassigned.is_empty() {
-            self.call_dialog(&ctx);
-        }
-        if let Some(target) = self.confirm_delete {
-            self.delete_dialog(&ctx, target);
-        }
-        self.entry_editor(&ctx);
-        self.away_dialog(&ctx);
-        self.rename_dialog(&ctx);
-        if let Some(export) = self.export.as_mut()
-            && !export.show(&ctx, &self.data, frame, self.always_on_top)
-        {
-            self.export = None;
-        }
     }
 }
 
