@@ -169,7 +169,10 @@ impl TimeSnapperApp {
     /// titellinjen oven i den placering vi beder om, så vinduet kryber nedad for
     /// hver genstart. eframe har bedt om den gemte placering og fået den plus en
     /// forskydning; bed derfor om den gemte placering minus forskydningen.
-    fn restore_window_position(&self, ctx: &egui::Context) {
+    fn restore_window_position(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        if self.move_to_primary_if_offscreen(ctx, frame) {
+            return;
+        }
         let Some([x, y]) = self.data.window_pos else { return };
         let Some(inner) = ctx.input(|i| i.viewport().inner_rect) else { return };
         let wanted = Pos2::new(x, y);
@@ -177,6 +180,49 @@ impl TimeSnapperApp {
         if drift.length() > 1.0 {
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(wanted + drift));
         }
+    }
+
+    /// Ligger vinduet (eller den gemte placering) uden for alle tilsluttede
+    /// skærme, f.eks. fordi en ekstra skærm er taget fra, flyttes det til midten
+    /// af den primære skærm. Returnerer true, hvis vinduet blev flyttet.
+    fn move_to_primary_if_offscreen(&mut self, ctx: &egui::Context, frame: &eframe::Frame) -> bool {
+        use winit::dpi::{PhysicalPosition, PhysicalSize};
+
+        let Some(window) = frame.winit_window() else { return false };
+        let monitors: Vec<egui::Rect> = window.available_monitors().map(|m| monitor_rect(&m)).collect();
+        if monitors.is_empty() {
+            return false;
+        }
+        let size = window.outer_size();
+        let size = Vec2::new(size.width as f32, size.height as f32);
+        // Den placering vinduet skal have: den gemte, ellers den nuværende (i pixels).
+        let ppp = ctx.pixels_per_point();
+        let wanted = match self.data.window_pos {
+            Some([x, y]) => Pos2::new(x * ppp, y * ppp),
+            None => match window.inner_position() {
+                Ok(p) => Pos2::new(p.x as f32, p.y as f32),
+                Err(_) => return false,
+            },
+        };
+        if title_bar_visible(egui::Rect::from_min_size(wanted, size), &monitors) {
+            return false;
+        }
+
+        let Some(target) = window.primary_monitor().or_else(|| window.available_monitors().next()) else {
+            return false;
+        };
+        let screen = monitor_rect(&target);
+        // Større end skærmen? Gør vinduet mindre, så det kan ses helt.
+        let fitted = size.min(screen.size() - Vec2::splat(80.0)).max(Vec2::splat(200.0));
+        if fitted != size {
+            let _ = window.request_inner_size(PhysicalSize::new(fitted.x as u32, fitted.y as u32));
+        }
+        let pos = screen.center() - fitted / 2.0;
+        window.set_outer_position(PhysicalPosition::new(pos.x as i32, pos.y as i32));
+        // Den gamle placering er ugyldig; den nye gemmes, når vinduet lukkes.
+        self.data.window_pos = None;
+        self.save();
+        true
     }
 
     fn timer_tab(&mut self, ui: &mut egui::Ui) {
@@ -701,7 +747,7 @@ impl eframe::App for TimeSnapperApp {
             let delay = StdDuration::from_millis(500);
             if self.started.elapsed() >= delay {
                 self.apply_window_level(&ctx);
-                self.restore_window_position(&ctx);
+                self.restore_window_position(&ctx, frame);
                 self.window_level_applied = true;
             } else {
                 ctx.request_repaint_after(delay);
@@ -1365,4 +1411,48 @@ fn day_notes(entries: &[DayEntry], project_id: Id) -> Vec<String> {
         }
     }
     notes
+}
+
+fn monitor_rect(monitor: &winit::monitor::MonitorHandle) -> egui::Rect {
+    let (pos, size) = (monitor.position(), monitor.size());
+    egui::Rect::from_min_size(
+        Pos2::new(pos.x as f32, pos.y as f32),
+        Vec2::new(size.width as f32, size.height as f32),
+    )
+}
+
+/// Om vinduets øverste del (hvor titellinjen er) kan ses og gribes på en skærm:
+/// mindst 80 × 20 pixels af den skal ligge på samme skærm.
+fn title_bar_visible(window: egui::Rect, monitors: &[egui::Rect]) -> bool {
+    let top = egui::Rect::from_min_size(window.min, Vec2::new(window.width(), window.height().min(40.0)));
+    monitors.iter().any(|m| {
+        let overlap = m.intersect(top);
+        overlap.width() >= 80.0_f32.min(window.width()) && overlap.height() >= 20.0
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: f32, y: f32, w: f32, h: f32) -> egui::Rect {
+        egui::Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h))
+    }
+
+    #[test]
+    fn title_bar_must_be_on_a_monitor() {
+        // To skærme over hinanden, 2560 × 1440.
+        let monitors = [rect(0.0, 0.0, 2560.0, 1440.0), rect(0.0, 1440.0, 2560.0, 1440.0)];
+        let window = |x, y| rect(x, y, 340.0, 560.0);
+
+        assert!(title_bar_visible(window(100.0, 100.0), &monitors));
+        assert!(title_bar_visible(window(100.0, 2000.0), &monitors), "på den nederste skærm");
+        assert!(title_bar_visible(window(2400.0, 100.0), &monitors), "delvist udenfor, men kan gribes");
+        assert!(!title_bar_visible(window(3000.0, 100.0), &monitors), "til højre for alle skærme");
+        assert!(!title_bar_visible(window(100.0, 2870.0), &monitors), "kun 10 px af toppen synlig");
+        assert!(!title_bar_visible(window(100.0, -500.0), &monitors), "titellinjen over skærmen");
+
+        // Kun den nederste skærm tilbage: et vindue fra den øverste er nu væk.
+        assert!(!title_bar_visible(window(100.0, 100.0), &monitors[1..]));
+    }
 }
