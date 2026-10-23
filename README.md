@@ -16,6 +16,7 @@ Det kan ligge øverst på skærmen uden at være i vejen.
 - Søgning i kunder og projekter, og højreklik for at udfolde/sammenklappe alle eller slette
 - Spørger om tiden skal være pause, når du har været væk fra computeren (indstilles i ☰-menuen)
 - Kan foldes sammen til en lille bjælke med tid og ikonknapper (som en mini-afspiller), der kan ligge i et hjørne af skærmen
+- Genvejstaster i programmet og globale genveje på Windows (fx pause eller telefon fra et hvilket som helst program). Kan ændres i ☰-menuen
 - Ikon i systembakken: start, skift projekt, pause og stop uden at vise vinduet
 - Kan starte automatisk, når du logger på (slås til/fra i ☰-menuen)
 - Lyst/mørkt tema, "hold øverst", og programmet husker vinduets størrelse og placering

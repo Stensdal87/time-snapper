@@ -1,6 +1,7 @@
 //! Brugerfladen.
 
 mod compact;
+mod shortcuts_dialog;
 
 use std::collections::HashMap;
 use std::f32::consts::TAU;
@@ -15,6 +16,9 @@ use crate::export_dialog::ExportDialog;
 use crate::idle::{IdleEvent, IdleWatcher};
 use crate::tray::{Tray, TrayAction, TrayProject, TrayState};
 use compact::{PendingMove, ProjectPicker, WindowLayout};
+use shortcuts_dialog::ShortcutsDialog;
+use crate::hotkeys::GlobalHotkeys;
+use crate::shortcuts::Action;
 use crate::data::{format_duration, DayEntry, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
@@ -107,6 +111,11 @@ pub struct TimeSnapperApp {
     /// Om bjælken sidst voksede opad (bunden fast). Samme kant bruges, når den
     /// folder sig sammen igen, så den vender tilbage til samme sted.
     bar_anchor_bottom: Option<bool>,
+    /// Globale genvejstaster (kun Windows indtil videre).
+    hotkeys: Option<GlobalHotkeys>,
+    shortcuts_dialog: Option<ShortcutsDialog>,
+    /// Sæt fokus i søgefeltet i næste frame (Ctrl+F).
+    focus_search: bool,
 }
 
 /// En periode hvor brugeren var væk, mens der kørte tid på et projekt.
@@ -163,7 +172,11 @@ impl TimeSnapperApp {
             pending_move: None,
             move_correction: Vec2::ZERO,
             bar_anchor_bottom: None,
+            hotkeys: None,
+            shortcuts_dialog: None,
+            focus_search: false,
         };
+        app.hotkeys = GlobalHotkeys::start(ctx, app.data.settings.shortcuts.globals());
         // Var vinduet foldet sammen ved sidste lukning, har det allerede den lille
         // størrelse; den normale størrelse er gemt for sig.
         if app.data.compact {
@@ -278,11 +291,13 @@ impl TimeSnapperApp {
         let on_call = active.is_some_and(|a| a.project_id.is_none());
         let on_pause = active.is_some_and(|a| a.is_note(NOTE_PAUSE));
         let running = active.is_some();
+        let (call_hint, stop_hint) = (self.shortcut_hint(Action::Call), self.shortcut_hint(Action::Stop));
+        let pause_hint = self.shortcut_hint(Action::Pause);
         ui.columns(3, |cols| {
             let size = [cols[0].available_width(), 26.0];
             if cols[0]
                 .add_enabled(!on_call, egui::Button::new("📞 Telefon").min_size(size.into()))
-                .on_hover_text("Start tid på et opkald. Projektet kan vælges under eller efter opkaldet.")
+                .on_hover_text(format!("Start tid på et opkald. Projektet kan vælges under eller efter opkaldet.{call_hint}"))
                 .clicked()
             {
                 self.data.start_call();
@@ -290,11 +305,14 @@ impl TimeSnapperApp {
             }
             let (pause_text, pause_hover) = if on_pause {
                 match self.data.pause_resume_project() {
-                    Some(id) => ("▶ Fortsæt".to_owned(), format!("Afslut pausen og fortsæt på {}", self.data.project_label(id))),
-                    None => ("☕ Afslut pause".to_owned(), "Afslut pausen og stop tiden".to_owned()),
+                    Some(id) => (
+                        "▶ Fortsæt".to_owned(),
+                        format!("Afslut pausen og fortsæt på {}{pause_hint}", self.data.project_label(id)),
+                    ),
+                    None => ("☕ Afslut pause".to_owned(), format!("Afslut pausen og stop tiden{pause_hint}")),
                 }
             } else {
-                ("☕ Pause".to_owned(), "Registreres på Intern tid. Tryk igen for at fortsætte, hvor du slap.".to_owned())
+                ("☕ Pause".to_owned(), format!("Registreres på Intern tid. Tryk igen for at fortsætte, hvor du slap.{pause_hint}"))
             };
             // Almindelig knap som de andre; markeret mens pausen kører.
             let pause_button = if on_pause {
@@ -312,6 +330,7 @@ impl TimeSnapperApp {
             }
             if cols[2]
                 .add_enabled(running, egui::Button::new("⏹ Stop").min_size(size.into()))
+                .on_hover_text(format!("Stop tiden{stop_hint}"))
                 .clicked()
             {
                 self.data.stop();
@@ -343,7 +362,10 @@ impl TimeSnapperApp {
         let mut start_project = None;
         let mut add_project = None;
 
-        search_field(ui, &mut self.search);
+        let search = search_field(ui, &mut self.search);
+        if std::mem::take(&mut self.focus_search) {
+            search.request_focus();
+        }
         ui.horizontal(|ui| {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut self.new_customer)
@@ -734,6 +756,10 @@ impl eframe::App for TimeSnapperApp {
     /// timeren, systembakken og "væk"-registreringen virker uden vinduet.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_tray_actions(ctx);
+        let global_actions = self.hotkeys.as_ref().map(|h| h.poll()).unwrap_or_default();
+        for action in global_actions {
+            self.run_action(ctx, action, true);
+        }
         self.handle_idle_events();
 
         if let Some(active) = &mut self.data.active {
@@ -791,6 +817,19 @@ impl eframe::App for TimeSnapperApp {
             ctx.request_repaint_after(StdDuration::from_millis(1000 - into_second + 5));
         }
 
+        // Tooltips må ikke blive bredere end vinduet; ellers kan de ikke læses
+        // i det smalle vindue. Lange tekster brydes i stedet om.
+        let tooltip_width = (ctx.content_rect().width() - 16.0).clamp(120.0, 320.0);
+        if ctx.global_style().spacing.tooltip_width != tooltip_width {
+            ctx.all_styles_mut(|style| style.spacing.tooltip_width = tooltip_width);
+        }
+
+        if !self.dialog_open() {
+            for action in self.data.settings.shortcuts.take_local_actions(&ctx) {
+                self.run_action(&ctx, action, false);
+            }
+        }
+
         let layout = self.wanted_layout();
         if self.window_level_applied && (!self.layout_applied || layout != self.layout) {
             self.apply_layout(&ctx, frame, layout);
@@ -820,6 +859,18 @@ impl eframe::App for TimeSnapperApp {
         self.entry_editor(&ctx);
         self.away_dialog(&ctx);
         self.rename_dialog(&ctx);
+        self.shortcuts_dialog(&ctx);
+        if layout == WindowLayout::Normal && self.picker.is_some() {
+            let modal = egui::Modal::new(egui::Id::unique("picker_modal")).show(&ctx, |ui| {
+                ui.allocate_ui(Vec2::new(320.0, 380.0), |ui| {
+                    ui.set_min_size(Vec2::new(320.0, 380.0));
+                    self.project_picker(ui);
+                });
+            });
+            if modal.should_close() {
+                self.picker = None;
+            }
+        }
         if let Some(export) = self.export.as_mut()
             && !export.show(&ctx, &self.data, frame, self.always_on_top)
         {
@@ -840,7 +891,8 @@ impl TimeSnapperApp {
                     self.history_view = HistoryView::Summary;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("🗕").on_hover_text("Fold sammen til en lille bjælke").clicked() {
+                    let fold_hint = self.shortcut_hint(Action::Fold);
+                    if ui.button("🗕").on_hover_text(format!("Fold sammen til en lille bjælke{fold_hint}")).clicked() {
                         self.data.compact = true;
                         self.save();
                     }
@@ -1149,6 +1201,69 @@ impl TimeSnapperApp {
 }
 
 impl TimeSnapperApp {
+    /// Om en dialog er åben (så genveje og bjælken venter).
+    fn dialog_open(&self) -> bool {
+        (self.call_dialog_open && !self.data.unassigned.is_empty())
+            || self.away_prompt.is_some()
+            || self.confirm_delete.is_some()
+            || self.editor.is_some()
+            || self.rename.is_some()
+            || self.export.is_some()
+            || self.shortcuts_dialog.is_some()
+    }
+
+    /// Udfører en handling fra en genvejstast. `global` er når genvejen blev
+    /// trykket i et andet program; så hentes vinduet frem, hvis det skal bruges.
+    fn run_action(&mut self, ctx: &egui::Context, action: Action, global: bool) {
+        match action {
+            Action::SwitchProject => {
+                if global {
+                    self.show_window(ctx);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                self.picker = match (&self.picker, global) {
+                    (Some(_), false) => None,
+                    _ => Some(ProjectPicker::default()),
+                };
+            }
+            Action::Pause => self.data.toggle_pause(),
+            Action::Call => self.data.start_call(),
+            Action::Stop => self.data.stop(),
+            Action::ToggleWindow => {
+                if self.window_visible {
+                    self.hide_window(ctx);
+                } else {
+                    self.show_window(ctx);
+                }
+            }
+            Action::Fold => self.data.compact = !self.data.compact,
+            Action::Search => {
+                if self.data.compact {
+                    self.picker = Some(ProjectPicker::default());
+                } else {
+                    self.tab = Tab::Timer;
+                    self.focus_search = true;
+                }
+            }
+            Action::TimerTab | Action::HistoryTab => {
+                self.data.compact = false;
+                self.tab = if action == Action::TimerTab { Tab::Timer } else { Tab::History };
+                self.history_view = HistoryView::Summary;
+            }
+            Action::Export => {
+                self.data.compact = false;
+                self.export = Some(ExportDialog::new());
+            }
+        }
+        self.save();
+        ctx.request_repaint();
+    }
+
+    /// " (Ctrl+P)" til tooltips, hvis handlingen har en genvej i programmet.
+    fn shortcut_hint(&self, action: Action) -> String {
+        self.data.settings.shortcuts.local(action).map_or_else(String::new, |c| format!(" ({c})"))
+    }
+
     fn show_window(&mut self, ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -1295,6 +1410,12 @@ impl TimeSnapperApp {
                 .weak()
                 .small(),
         );
+        ui.add_space(14.0);
+        ui.label(RichText::new("Genvejstaster").strong());
+        if ui.button("⌨ Genvejstaster…").clicked() {
+            self.shortcuts_dialog = Some(ShortcutsDialog::default());
+        }
+
         if self.tray.is_some() {
             ui.add_space(14.0);
             ui.label(RichText::new("Systembakke").strong());
@@ -1426,9 +1547,9 @@ fn typed_target_fields(ui: &mut egui::Ui, target: &mut CallTarget) {
     }
 }
 
-fn search_field(ui: &mut egui::Ui, query: &mut String) {
+fn search_field(ui: &mut egui::Ui, query: &mut String) -> egui::Response {
     ui.horizontal(|ui| {
-        ui.add(
+        let response = ui.add(
             egui::TextEdit::singleline(query)
                 .hint_text("🔍 Søg kunde eller projekt…")
                 .desired_width(ui.available_width() - 30.0),
@@ -1436,7 +1557,9 @@ fn search_field(ui: &mut egui::Ui, query: &mut String) {
         if ui.add_enabled(!query.is_empty(), egui::Button::new("✕")).clicked() {
             query.clear();
         }
-    });
+        response
+    })
+    .inner
 }
 
 /// Kundens projekter der matcher søgningen (uden hensyn til store/små bogstaver).

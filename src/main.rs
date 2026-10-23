@@ -7,7 +7,9 @@ mod data;
 mod entry_editor;
 mod export;
 mod export_dialog;
+mod hotkeys;
 mod idle;
+mod shortcuts;
 mod tray;
 
 use eframe::egui;

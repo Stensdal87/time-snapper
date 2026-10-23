@@ -6,6 +6,7 @@
 //! dialoger ikke havner uden for skærmen.
 
 use super::*;
+use crate::shortcuts::Action;
 
 /// Hvad vinduet viser og dermed hvor stort det er.
 #[derive(Clone, Copy, PartialEq)]
@@ -48,14 +49,7 @@ impl TimeSnapperApp {
         if !self.data.compact {
             return WindowLayout::Normal;
         }
-        let dialog_open = (self.call_dialog_open && !self.data.unassigned.is_empty())
-            || self.away_prompt.is_some()
-            || self.confirm_delete.is_some()
-            || self.editor.is_some()
-            || self.rename.is_some()
-            || self.export.is_some()
-            || self.settings_open;
-        if dialog_open {
+        if self.dialog_open() || self.settings_open {
             WindowLayout::Normal
         } else if self.picker.is_some() {
             WindowLayout::Picker
@@ -169,6 +163,14 @@ impl TimeSnapperApp {
             _ => "Pause (Intern tid)".to_owned(),
         };
 
+        let hint = |action| self.shortcut_hint(action);
+        let (fold_hover, stop_hover, call_hover, switch_hover) = (
+            format!("Fold ud til det fulde program{}", hint(Action::Fold)),
+            format!("Stop{}", hint(Action::Stop)),
+            format!("Telefon{}", hint(Action::Call)),
+            format!("Skift projekt{}", hint(Action::SwitchProject)),
+        );
+        let pause_hover = format!("{pause_hover}{}", hint(Action::Pause));
         let mut open_picker = false;
         ui.horizontal_centered(|ui| {
             let (dot, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
@@ -176,11 +178,11 @@ impl TimeSnapperApp {
             ui.label(RichText::new(time).monospace().size(15.0).strong());
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_button(ui, "🗖", "Fold ud til det fulde program", true, false) {
+                if icon_button(ui, "🗖", &fold_hover, true, false) {
                     self.data.compact = false;
                     self.save();
                 }
-                if icon_button(ui, "⏹", "Stop", running, false) {
+                if icon_button(ui, "⏹", &stop_hover, running, false) {
                     self.data.stop();
                     self.save();
                 }
@@ -188,11 +190,11 @@ impl TimeSnapperApp {
                     self.data.toggle_pause();
                     self.save();
                 }
-                if icon_button(ui, "📞", "Telefon", !on_call, false) {
+                if icon_button(ui, "📞", &call_hover, !on_call, false) {
                     self.data.start_call();
                     self.save();
                 }
-                if icon_button(ui, "🔀", "Skift projekt", true, false) {
+                if icon_button(ui, "🔀", &switch_hover, true, false) {
                     open_picker = true;
                 }
                 // Projektnavnet fylder resten; klik på det åbner også vælgeren.

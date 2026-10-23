@@ -201,11 +201,12 @@ pub struct Settings {
     pub away_minutes: u32,
     /// Lukkeknappen skjuler vinduet i systembakken i stedet for at afslutte.
     pub close_to_tray: bool,
+    pub shortcuts: crate::shortcuts::Shortcuts,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { away_enabled: true, away_minutes: 15, close_to_tray: true }
+        Self { away_enabled: true, away_minutes: 15, close_to_tray: true, shortcuts: Default::default() }
     }
 }
 
