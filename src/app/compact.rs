@@ -157,17 +157,23 @@ impl TimeSnapperApp {
                 (color, format_duration(a.elapsed()), label)
             }
         };
-        let pause_hover = match self.data.pause_resume_project() {
-            Some(id) if on_pause => format!("Fortsæt på {}", self.data.project_label(id)),
+        let resume = self.data.resume_project().map(|id| self.data.project_label(id));
+        let pause_hover = match &resume {
+            Some(label) if on_pause => format!("Fortsæt på {label}"),
             _ if on_pause => "Afslut pausen".to_owned(),
             _ => "Pause (Intern tid)".to_owned(),
+        };
+        let call_hover = match &resume {
+            Some(label) if on_call => format!("Afslut opkaldet og fortsæt på {label}"),
+            _ if on_call => "Afslut opkaldet".to_owned(),
+            _ => "Telefon".to_owned(),
         };
 
         let hint = |action| self.shortcut_hint(action);
         let (fold_hover, stop_hover, call_hover, switch_hover) = (
             format!("Fold ud til det fulde program{}", hint(Action::Fold)),
             format!("Stop{}", hint(Action::Stop)),
-            format!("Telefon{}", hint(Action::Call)),
+            format!("{call_hover}{}", hint(Action::Call)),
             format!("Skift projekt{}", hint(Action::SwitchProject)),
         );
         let pause_hover = format!("{pause_hover}{}", hint(Action::Pause));
@@ -190,8 +196,8 @@ impl TimeSnapperApp {
                     self.data.toggle_pause();
                     self.save();
                 }
-                if icon_button(ui, "📞", &call_hover, !on_call, false) {
-                    self.data.start_call();
+                if icon_button(ui, "📞", &call_hover, true, on_call) {
+                    self.data.toggle_call();
                     self.save();
                 }
                 if icon_button(ui, "🔀", &switch_hover, true, false) {

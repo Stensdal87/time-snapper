@@ -38,7 +38,7 @@ impl Action {
         match self {
             Action::SwitchProject => "Skift projekt",
             Action::Pause => "Pause / fortsæt",
-            Action::Call => "Telefon",
+            Action::Call => "Telefon / afslut",
             Action::Stop => "Stop",
             Action::ToggleWindow => "Vis / skjul vindue",
             Action::Fold => "Fold sammen / ud",

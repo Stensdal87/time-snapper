@@ -293,18 +293,26 @@ impl TimeSnapperApp {
         let running = active.is_some();
         let (call_hint, stop_hint) = (self.shortcut_hint(Action::Call), self.shortcut_hint(Action::Stop));
         let pause_hint = self.shortcut_hint(Action::Pause);
+        let resume_label = self.data.resume_project().map(|id| self.data.project_label(id));
+        let (call_text, call_hover) = match (on_call, &resume_label) {
+            (true, Some(label)) => ("📞 Afslut", format!("Afslut opkaldet og fortsæt på {label}{call_hint}")),
+            (true, None) => ("📞 Afslut", format!("Afslut opkaldet{call_hint}")),
+            (false, _) => (
+                "📞 Telefon",
+                format!("Start tid på et opkald. Tryk igen for at afslutte og fortsætte, hvor du slap.{call_hint}"),
+            ),
+        };
         ui.columns(3, |cols| {
             let size = [cols[0].available_width(), 26.0];
-            if cols[0]
-                .add_enabled(!on_call, egui::Button::new("📞 Telefon").min_size(size.into()))
-                .on_hover_text(format!("Start tid på et opkald. Projektet kan vælges under eller efter opkaldet.{call_hint}"))
-                .clicked()
-            {
-                self.data.start_call();
+            // Markeret mens opkaldet kører, ligesom pause-knappen.
+            let call_button =
+                if on_call { egui::Button::selectable(true, call_text) } else { egui::Button::new(call_text) };
+            if cols[0].add(call_button.min_size(size.into())).on_hover_text(call_hover).clicked() {
+                self.data.toggle_call();
                 self.save();
             }
             let (pause_text, pause_hover) = if on_pause {
-                match self.data.pause_resume_project() {
+                match self.data.resume_project() {
                     Some(id) => (
                         "▶ Fortsæt".to_owned(),
                         format!("Afslut pausen og fortsæt på {}{pause_hint}", self.data.project_label(id)),
@@ -1227,7 +1235,7 @@ impl TimeSnapperApp {
                 };
             }
             Action::Pause => self.data.toggle_pause(),
-            Action::Call => self.data.start_call(),
+            Action::Call => self.data.toggle_call(),
             Action::Stop => self.data.stop(),
             Action::ToggleWindow => {
                 if self.window_visible {
@@ -1303,7 +1311,7 @@ impl TimeSnapperApp {
                 TrayAction::Toggle if self.window_visible => self.hide_window(ctx),
                 TrayAction::Toggle => self.show_window(ctx),
                 TrayAction::Start(id) => self.data.start(id),
-                TrayAction::Call => self.data.start_call(),
+                TrayAction::Call => self.data.toggle_call(),
                 TrayAction::Pause => self.data.toggle_pause(),
                 TrayAction::Stop => self.data.stop(),
                 TrayAction::Quit => {
@@ -1337,10 +1345,17 @@ impl TimeSnapperApp {
             }
         };
         let on_pause = active.is_some_and(|a| a.is_note(NOTE_PAUSE));
-        let pause_label = match (on_pause, self.data.pause_resume_project()) {
+        let on_call = active.is_some_and(|a| a.is_call());
+        let resume = self.data.resume_project().map(|id| self.data.project_label(id));
+        let pause_label = match (on_pause, &resume) {
             (false, _) => "☕ Pause".to_owned(),
-            (true, Some(id)) => format!("▶ Fortsæt på {}", self.data.project_label(id)),
+            (true, Some(label)) => format!("▶ Fortsæt på {label}"),
             (true, None) => "☕ Afslut pause".to_owned(),
+        };
+        let call_label = match (on_call, &resume) {
+            (false, _) => "📞 Telefon".to_owned(),
+            (true, Some(label)) => format!("📞 Afslut opkald og fortsæt på {label}"),
+            (true, None) => "📞 Afslut opkald".to_owned(),
         };
         let customers = self
             .data
@@ -1359,7 +1374,7 @@ impl TimeSnapperApp {
         let state = TrayState {
             status,
             running: active.is_some(),
-            on_call: active.is_some_and(|a| a.project_id.is_none()),
+            call_label,
             pause_label,
             window_visible: self.window_visible,
             customers,

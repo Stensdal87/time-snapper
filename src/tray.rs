@@ -35,7 +35,8 @@ pub struct TrayState {
     /// Ændres hvert sekund, mens tiden kører.
     pub status: String,
     pub running: bool,
-    pub on_call: bool,
+    /// Teksten på telefon-punktet ("📞 Telefon", "📞 Afslut opkald …").
+    pub call_label: String,
     /// Teksten på pause-punktet ("☕ Pause", "▶ Fortsæt" …).
     pub pause_label: String,
     pub window_visible: bool,
@@ -180,7 +181,7 @@ mod platform {
                 item(s.status.clone(), false, |_| {}),
                 MenuItem::Separator,
                 SubMenu { label: "Skift projekt".into(), submenu: projects, ..Default::default() }.into(),
-                item("📞 Telefon", !s.on_call, |t| t.sender.send(TrayAction::Call)),
+                item(s.call_label.clone(), true, |t| t.sender.send(TrayAction::Call)),
                 item(s.pause_label.clone(), true, |t| t.sender.send(TrayAction::Pause)),
                 item("⏹ Stop", s.running, |t| t.sender.send(TrayAction::Stop)),
                 MenuItem::Separator,
@@ -278,7 +279,7 @@ mod platform {
         let _ = menu.append(&status_item);
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&switch);
-        let _ = menu.append(&MenuItem::with_id("call", "📞 Telefon", !s.on_call, None));
+        let _ = menu.append(&MenuItem::with_id("call", &s.call_label, true, None));
         let _ = menu.append(&MenuItem::with_id("pause", &s.pause_label, true, None));
         let _ = menu.append(&MenuItem::with_id("stop", "⏹ Stop", s.running, None));
         let _ = menu.append(&PredefinedMenuItem::separator());

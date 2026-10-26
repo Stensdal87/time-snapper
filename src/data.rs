@@ -109,12 +109,10 @@ pub struct ActiveTimer {
     /// Kan udfyldes mens et opkald kører, så det registreres direkte når det slutter.
     #[serde(default, skip_serializing_if = "CallTarget::is_empty")]
     pub target: CallTarget,
-    /// Under en pause: projektet der kørte før, som der fortsættes på bagefter.
+    /// Under en pause eller et opkald: tidstagningen der kørte før, som der
+    /// fortsættes på, når pausen/opkaldet afsluttes med samme knap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resume_project: Option<Id>,
-    /// Under en pause: hvor længe uret havde kørt før pausen.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub resume_secs: i64,
+    pub previous: Option<Box<ActiveTimer>>,
     /// Tid fra før en pause, som uret tæller videre fra. Kun til visning;
     /// registreringerne gemmes stadig hver for sig.
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -122,9 +120,12 @@ pub struct ActiveTimer {
     /// Note der skrives mens tiden kører; følger med registreringen.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
-    /// Under en pause: noten fra projektet før pausen.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub resume_description: String,
+}
+
+/// Kopi af en kørende tidstagning med uret frosset (`carried_secs` = vist tid),
+/// så den kan genoptages efter en pause eller et opkald.
+fn frozen(active: &ActiveTimer) -> Box<ActiveTimer> {
+    Box::new(ActiveTimer { carried_secs: active.elapsed().num_seconds(), ..active.clone() })
 }
 
 fn is_zero(n: &i64) -> bool {
@@ -134,6 +135,11 @@ fn is_zero(n: &i64) -> bool {
 impl ActiveTimer {
     pub fn is_note(&self, note: &str) -> bool {
         self.note.as_deref() == Some(note)
+    }
+
+    /// Et telefonopkald, der endnu ikke hører til et projekt.
+    pub fn is_call(&self) -> bool {
+        self.project_id.is_none()
     }
 
     /// Tiden uret viser: denne tidstagning plus evt. tid fra før en pause.
@@ -427,37 +433,61 @@ impl Data {
     }
 
     /// Starter en pause, som registreres på "Intern tid". Kører der en pause,
-    /// afsluttes den i stedet, og tiden fortsætter på projektet fra før pausen.
+    /// afsluttes den i stedet, og tiden fortsætter, hvor den slap før pausen.
     pub fn toggle_pause(&mut self) {
-        if let Some(active) = self.active.as_ref().filter(|a| a.is_note(NOTE_PAUSE)) {
-            let carried = active.resume_secs;
-            let description = active.resume_description.clone();
-            match self.pause_resume_project() {
-                Some(id) => {
-                    self.start(id);
-                    if let Some(active) = &mut self.active {
-                        active.carried_secs = carried;
-                        active.description = description;
-                    }
-                }
-                None => self.stop(),
-            }
+        if self.active.as_ref().is_some_and(|a| a.is_note(NOTE_PAUSE)) {
+            self.end_interruption();
             return;
         }
-        // Et opkald uden projekt kan ikke genoptages; det registreres som normalt.
-        let resume = self
-            .active
-            .as_ref()
-            .and_then(|a| Some((a.project_id?, a.elapsed().num_seconds(), a.description.clone())));
+        // Under et opkald: pausen afslutter opkaldet og vender bagefter tilbage
+        // til det, der kørte før opkaldet.
+        let previous = match self.active.as_ref() {
+            Some(a) if a.is_call() => a.previous.clone(),
+            other => other.map(frozen),
+        };
         let id = self.internal_project_id();
         self.start_timer(Some(id), Some(NOTE_PAUSE));
-        if let Some(active) = &mut self.active
-            && let Some((project_id, secs, description)) = resume
-        {
-            active.resume_project = Some(project_id);
-            active.resume_secs = secs;
-            active.resume_description = description;
+        if let Some(active) = &mut self.active {
+            active.previous = previous;
         }
+    }
+
+    /// Starter et telefonopkald. Kører der et opkald, afsluttes det i stedet, og
+    /// tiden fortsætter på det, der kørte, da telefonen ringede. Opkaldet
+    /// registreres på sit projekt, eller venter på at få et.
+    pub fn toggle_call(&mut self) {
+        if self.active.as_ref().is_some_and(ActiveTimer::is_call) {
+            self.end_interruption();
+            return;
+        }
+        let previous = self.active.as_ref().map(frozen);
+        self.start_call();
+        if let Some(active) = &mut self.active {
+            active.previous = previous;
+        }
+    }
+
+    /// Afslutter den kørende pause/det kørende opkald og fortsætter på det, der
+    /// kørte før: samme projekt, note og type, og uret tæller videre derfra.
+    fn end_interruption(&mut self) {
+        let Some(active) = self.active.as_ref() else { return };
+        let previous = active.previous.clone();
+        self.stop();
+        let Some(previous) = previous else { return };
+        if let Some(id) = previous.project_id
+            && !self.project(id).is_some_and(|p| !p.deleted)
+        {
+            return; // projektet er slettet i mellemtiden
+        }
+        let now = Local::now();
+        self.active = Some(ActiveTimer { start: now, last_seen: now, ..*previous });
+    }
+
+    /// Projektet en kørende pause eller et kørende opkald vender tilbage til,
+    /// hvis det stadig findes.
+    pub fn resume_project(&self) -> Option<Id> {
+        let id = self.active.as_ref()?.previous.as_ref()?.project_id?;
+        self.project(id).filter(|p| !p.deleted).map(|p| p.id)
     }
 
     /// Flytter tiden fra `from` til `to` fra den kørende timer over på pause.
@@ -493,12 +523,6 @@ impl Data {
             active.last_seen = active.last_seen.max(to);
         }
         true
-    }
-
-    /// Projektet en kørende pause vender tilbage til, hvis det stadig findes.
-    pub fn pause_resume_project(&self) -> Option<Id> {
-        let active = self.active.as_ref().filter(|a| a.is_note(NOTE_PAUSE))?;
-        active.resume_project.filter(|id| self.project(*id).is_some_and(|p| !p.deleted))
     }
 
     fn start_timer(&mut self, project_id: Option<Id>, note: Option<&str>) {
@@ -951,7 +975,7 @@ mod tests {
         data.toggle_pause();
         let internal = data.internal_project_id();
         assert_eq!(data.active.as_ref().unwrap().project_id, Some(internal));
-        assert_eq!(data.pause_resume_project(), Some(p));
+        assert_eq!(data.resume_project(), Some(p));
         data.active.as_mut().unwrap().start -= Duration::minutes(10);
 
         data.toggle_pause();
@@ -1029,6 +1053,63 @@ mod tests {
         data.unassigned[0].target.project_id = Some(p);
         assert!(data.register_first_unassigned());
         assert_eq!(data.entries.last().unwrap().description, "Spørgsmål om faktura");
+    }
+
+    #[test]
+    fn pressing_phone_again_ends_call_and_resumes_project() {
+        let mut data = Data::default();
+        let c = data.add_customer("Kunde");
+        let p = data.add_project(c, "A");
+        data.start(p);
+        let active = data.active.as_mut().unwrap();
+        active.start -= Duration::minutes(30);
+        active.description = "Forside".to_owned();
+
+        data.toggle_call();
+        assert!(data.active.as_ref().unwrap().is_call());
+        assert_eq!(data.resume_project(), Some(p));
+        data.active.as_mut().unwrap().start -= Duration::minutes(5);
+
+        data.toggle_call();
+        let active = data.active.as_ref().unwrap();
+        assert_eq!(active.project_id, Some(p), "tilbage på projektet");
+        assert_eq!(active.description, "Forside", "noten er med");
+        assert_eq!(active.elapsed().num_minutes(), 30, "uret tæller videre uden opkaldet");
+        assert_eq!(data.entries.len(), 1, "projekttiden før opkaldet");
+        assert_eq!(data.unassigned.len(), 1, "opkaldet venter på et projekt");
+    }
+
+    #[test]
+    fn call_during_pause_returns_to_pause_then_project() {
+        let mut data = Data::default();
+        let c = data.add_customer("Kunde");
+        let p = data.add_project(c, "A");
+        data.start(p);
+        data.active.as_mut().unwrap().start -= Duration::minutes(20);
+        data.toggle_pause();
+        data.active.as_mut().unwrap().start -= Duration::minutes(5);
+
+        data.toggle_call();
+        data.active.as_mut().unwrap().target.project_id = Some(p);
+        data.active.as_mut().unwrap().start -= Duration::minutes(2);
+        data.toggle_call();
+        assert!(data.active.as_ref().unwrap().is_note(NOTE_PAUSE), "tilbage på pausen");
+        assert_eq!(data.entries.last().unwrap().note.as_deref(), Some(NOTE_PHONE), "opkaldet registreret");
+
+        data.toggle_pause();
+        let active = data.active.as_ref().unwrap();
+        assert_eq!(active.project_id, Some(p), "og så tilbage på projektet");
+        assert_eq!(active.elapsed().num_minutes(), 20);
+    }
+
+    #[test]
+    fn call_without_running_timer_just_stops() {
+        let mut data = Data::default();
+        data.toggle_call();
+        data.active.as_mut().unwrap().start -= Duration::minutes(3);
+        data.toggle_call();
+        assert!(data.active.is_none());
+        assert_eq!(data.unassigned.len(), 1);
     }
 
     #[test]
