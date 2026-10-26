@@ -68,3 +68,50 @@ fn migrate_from_old_name() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui::FontFamily;
+    use eframe::egui::epaint::text::{FontDefinitions, Fonts, TextOptions};
+
+    /// Alle tegn i programmets tekster skal findes i de indbyggede skrifttyper.
+    /// Ellers henter egui dem fra systemet, og på Windows bliver de ofte til
+    /// tomme firkanter (det skete med ☰ og 🗕), selvom de ser fine ud på Linux.
+    #[test]
+    fn all_ui_characters_are_in_bundled_fonts() {
+        let mut fonts = Fonts::new(TextOptions::default(), FontDefinitions::default());
+        let mut view = fonts.with_pixels_per_point(1.0);
+        // Tegn i tekst med fast bredde (f.eks. "1:00 ↓") kommer fra Hack.
+        let mut available = view.characters(&FontFamily::Proportional).clone();
+        available.extend(view.characters(&FontFamily::Monospace).clone());
+
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![src.clone()];
+        let mut missing = Vec::new();
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                files.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+                let code = line.trim_start();
+                if code.starts_with("//") {
+                    continue;
+                }
+                // Kun tegn inde i strenge ("…" eller '…').
+                let mut in_string = false;
+                for c in line.chars() {
+                    if c == '"' {
+                        in_string = !in_string;
+                    } else if in_string && !c.is_ascii() && !available.contains_key(&c) && c != '\u{FE0F}' {
+                        missing.push(format!("{c} (U+{:04X}) i {}:{}", c as u32, path.display(), n + 1));
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "Tegn uden indbygget skrifttype:\n{}", missing.join("\n"));
+    }
+}

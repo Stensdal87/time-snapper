@@ -927,7 +927,7 @@ impl TimeSnapperApp {
             egui::Panel::bottom("error").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.colored_label(ui.visuals().error_fg_color, error);
-                    if ui.small_button("✕").clicked() {
+                    if ui.small_button("×").clicked() {
                         self.error = None;
                     }
                 });
@@ -1599,7 +1599,7 @@ fn search_field(ui: &mut egui::Ui, query: &mut String) -> egui::Response {
                 .hint_text("🔍 Søg kunde eller projekt…")
                 .desired_width(ui.available_width() - 30.0),
         );
-        if ui.add_enabled(!query.is_empty(), egui::Button::new("✕")).clicked() {
+        if ui.add_enabled(!query.is_empty(), egui::Button::new("×")).clicked() {
             query.clear();
         }
         response

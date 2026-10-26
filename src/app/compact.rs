@@ -233,7 +233,7 @@ impl TimeSnapperApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Skift projekt").strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close |= ui.small_button("✕").on_hover_text("Luk (Esc)").clicked();
+                close |= ui.small_button("×").on_hover_text("Luk (Esc)").clicked();
             });
         });
         let response = ui.add(

@@ -41,6 +41,9 @@ Et lille vindue (der kan holdes øverst), som tager tid på projekter under kund
 - Historikken har to visninger. "Summeret" giver én linje pr. projekt med antal registreringer og total. "Alle registreringer" viser hver registrering for sig. Summeret er standard og vælges igen, hver gang man går over på fanen. Summeret har også en kolonne "Afrundet" (`round_up_quarter`: op til nærmeste påbegyndte kvarter, vist som t:mm). Dens I alt er summen af de afrundede projekttider. Et klik på den afrundede tid skifter mellem at runde op og ned for det projekt den dag (`Data.round_down`, `Data::rounded`). En nedrundet tid vises med ↓.
 - Fanen Historik viser registreringer og totaler pr. dag, og man kan bladre mellem dagene.
 
+## Ikoner og skrifttyper
+egui 0.37 har kun emoji-skrifttyperne med (NotoEmoji og emoji-icon-font), når featuren `monochrome_emoji_fonts` er slået til. Derfor står `egui` med den feature i Cargo.toml. Uden den kommer ikoner som ☰ og 🗕 fra systemets skrifttyper: på Linux virker de, men på Windows bliver de tomme firkanter. Testen `all_ui_characters_are_in_bundled_fonts` i `main.rs` gennemgår alle strenge i `src/` og fejler, hvis et tegn ikke findes i de indbyggede skrifttyper. Brug f.eks. × i stedet for ✕, som ingen af dem har.
+
 ## Struktur
 - `src/main.rs` står for vinduesopsætningen (eframe/egui 0.37). Bemærk den nye API: `App::ui(&mut self, ui, frame)` og `egui::Panel::top/bottom(...).show(ui, ..)`.
 - `src/data.rs` indeholder datamodellen og lagringen og har unit tests.

@@ -8,6 +8,10 @@ description = "Lille tidsregistreringsprogram til kunder og projekter"
 chrono = { version = "0.4.45", features = ["serde"] }
 directories = "6.0.0"
 eframe = { version = "0.37.0", features = ["persistence"] }
+# Ikoner/emoji bygget ind i programmet, så de ser ens ud på alle systemer. Uden
+# dem henter egui tegnene fra systemets skrifttyper, og på Windows bliver f.eks.
+# ☰ og 🗕 til tomme firkanter.
+egui = { version = "0.37.0", features = ["monochrome_emoji_fonts"] }
 rfd = "0.17.2"
 rust_xlsxwriter = { version = "0.100.0", features = ["chrono"] }
 serde = { version = "1.0.229", features = ["derive"] }
