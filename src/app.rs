@@ -1,5 +1,6 @@
 //! Brugerfladen.
 
+mod break_reminder;
 mod compact;
 mod shortcuts_dialog;
 
@@ -15,6 +16,7 @@ use crate::entry_editor::{EditorAction, EntryEditor};
 use crate::export_dialog::ExportDialog;
 use crate::idle::{IdleEvent, IdleWatcher};
 use crate::tray::{Tray, TrayAction, TrayProject, TrayState};
+use break_reminder::BreakReminder;
 use compact::{PendingMove, ProjectPicker, WindowLayout};
 use shortcuts_dialog::ShortcutsDialog;
 use crate::hotkeys::GlobalHotkeys;
@@ -116,6 +118,7 @@ pub struct TimeSnapperApp {
     shortcuts_dialog: Option<ShortcutsDialog>,
     /// Sæt fokus i søgefeltet i næste frame (Ctrl+F).
     focus_search: bool,
+    break_reminder: BreakReminder,
 }
 
 /// En periode hvor brugeren var væk, mens der kørte tid på et projekt.
@@ -175,6 +178,7 @@ impl TimeSnapperApp {
             hotkeys: None,
             shortcuts_dialog: None,
             focus_search: false,
+            break_reminder: BreakReminder::new(),
         };
         app.hotkeys = GlobalHotkeys::start(ctx, app.data.settings.shortcuts.globals());
         // Var vinduet foldet sammen ved sidste lukning, har det allerede den lille
@@ -787,7 +791,10 @@ impl eframe::App for TimeSnapperApp {
         self.seen_unassigned = pending;
 
         // Et spørgsmål skal kunne ses: vis vinduet, hvis det er skjult.
-        let needs_answer = self.away_prompt.is_some() || (self.call_dialog_open && pending > 0);
+        self.update_break_reminder(ctx);
+        let needs_answer = self.away_prompt.is_some()
+            || (self.call_dialog_open && pending > 0)
+            || self.break_reminder.is_open();
         if needs_answer && !self.window_visible {
             self.show_window(ctx);
         }
@@ -866,6 +873,7 @@ impl eframe::App for TimeSnapperApp {
         }
         self.entry_editor(&ctx);
         self.away_dialog(&ctx);
+        self.break_dialog(&ctx);
         self.rename_dialog(&ctx);
         self.shortcuts_dialog(&ctx);
         if layout == WindowLayout::Normal && self.picker.is_some() {
@@ -1218,6 +1226,7 @@ impl TimeSnapperApp {
             || self.rename.is_some()
             || self.export.is_some()
             || self.shortcuts_dialog.is_some()
+            || self.break_reminder.is_open()
     }
 
     /// Udfører en handling fra en genvejstast. `global` er når genvejen blev
@@ -1411,6 +1420,26 @@ impl TimeSnapperApp {
         }
         ui.add_space(14.0);
 
+        ui.label(RichText::new("Pausepåmindelse").strong());
+        let mut settings = self.data.settings.clone();
+        ui.checkbox(&mut settings.break_reminder, "Mind mig om at holde en kort pause");
+        ui.add_enabled_ui(settings.break_reminder, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Efter");
+                ui.add(egui::Slider::new(&mut settings.break_minutes, 15..=180).step_by(5.0).suffix(" min"));
+            });
+        });
+        ui.label(
+            RichText::new("Arbejdstid tælles fra sidste pause, eller fra du har været væk eller haft tiden stoppet i mindst 5 min.")
+                .weak()
+                .small(),
+        );
+        if settings != self.data.settings {
+            self.data.settings = settings;
+            self.save();
+        }
+        ui.add_space(14.0);
+
         ui.label(RichText::new("Væk fra computeren").strong());
         let mut settings = self.data.settings.clone();
         ui.checkbox(&mut settings.away_enabled, "Spørg om tiden skal være pause, når jeg har været væk");
@@ -1463,6 +1492,7 @@ impl TimeSnapperApp {
                 }
                 IdleEvent::Back { at } => {
                     if let Some(since) = self.away_since.take() {
+                        self.break_reminder.note_away(since, at);
                         self.consider_away(since, at);
                     }
                 }

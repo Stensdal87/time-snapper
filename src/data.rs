@@ -207,12 +207,22 @@ pub struct Settings {
     pub away_minutes: u32,
     /// Lukkeknappen skjuler vinduet i systembakken i stedet for at afslutte.
     pub close_to_tray: bool,
+    /// Foreslå en kort pause, når man har arbejdet `break_minutes` uden.
+    pub break_reminder: bool,
+    pub break_minutes: u32,
     pub shortcuts: crate::shortcuts::Shortcuts,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { away_enabled: true, away_minutes: 15, close_to_tray: true, shortcuts: Default::default() }
+        Self {
+            away_enabled: true,
+            away_minutes: 15,
+            close_to_tray: true,
+            break_reminder: false,
+            break_minutes: 60,
+            shortcuts: Default::default(),
+        }
     }
 }
 
