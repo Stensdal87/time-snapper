@@ -1,6 +1,7 @@
 //! Brugerfladen.
 
 mod break_reminder;
+pub(crate) mod breathing;
 mod compact;
 mod shortcuts_dialog;
 
@@ -17,6 +18,7 @@ use crate::export_dialog::ExportDialog;
 use crate::idle::{IdleEvent, IdleWatcher};
 use crate::tray::{Tray, TrayAction, TrayProject, TrayState};
 use break_reminder::BreakReminder;
+use breathing::{Breathing, Exercise};
 use compact::{PendingMove, ProjectPicker, WindowLayout};
 use shortcuts_dialog::ShortcutsDialog;
 use crate::hotkeys::GlobalHotkeys;
@@ -119,6 +121,10 @@ pub struct TimeSnapperApp {
     /// Sæt fokus i søgefeltet i næste frame (Ctrl+F).
     focus_search: bool,
     break_reminder: BreakReminder,
+    /// Åndedrætsøvelsen, mens den er i gang (eget vindue).
+    breathing: Option<Breathing>,
+    /// Kørte der en pause sidst? Bruges til at starte/stoppe øvelsen med pausen.
+    was_on_pause: bool,
 }
 
 /// En periode hvor brugeren var væk, mens der kørte tid på et projekt.
@@ -179,6 +185,8 @@ impl TimeSnapperApp {
             shortcuts_dialog: None,
             focus_search: false,
             break_reminder: BreakReminder::new(),
+            breathing: None,
+            was_on_pause: false,
         };
         app.hotkeys = GlobalHotkeys::start(ctx, app.data.settings.shortcuts.globals());
         // Var vinduet foldet sammen ved sidste lukning, har det allerede den lille
@@ -349,6 +357,14 @@ impl TimeSnapperApp {
                 self.save();
             }
         });
+        if on_pause {
+            ui.add_space(4.0);
+            let label = if self.breathing.is_some() { "💨 Åndedrætsøvelse kører…" } else { "💨 Åndedrætsøvelse" };
+            let button = egui::Button::new(label).min_size(Vec2::new(ui.available_width(), 26.0));
+            if ui.add_enabled(self.breathing.is_none(), button).on_hover_text("En kort guidet vejrtrækning i et lille vindue").clicked() {
+                self.start_breathing();
+            }
+        }
         if let Some(active) = &mut self.data.active {
             ui.add_space(4.0);
             let changed = ui
@@ -792,6 +808,20 @@ impl eframe::App for TimeSnapperApp {
 
         // Et spørgsmål skal kunne ses: vis vinduet, hvis det er skjult.
         self.update_break_reminder(ctx);
+
+        // Øvelsen følger pausen: starter evt. af sig selv, og lukker når pausen slutter.
+        let on_pause = self.data.active.as_ref().is_some_and(|a| a.is_note(NOTE_PAUSE));
+        if on_pause && !self.was_on_pause && self.data.settings.breathing_auto && self.breathing.is_none() {
+            self.start_breathing();
+        } else if !on_pause && self.was_on_pause {
+            self.breathing = None;
+        }
+        self.was_on_pause = on_pause;
+        if self.breathing.is_some() && !self.window_visible {
+            // Øvelsesvinduet tegnes sammen med hovedvinduet; bed om det, selvom det er skjult.
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+            ctx.request_repaint();
+        }
         let needs_answer = self.away_prompt.is_some()
             || (self.call_dialog_open && pending > 0)
             || self.break_reminder.is_open();
@@ -874,6 +904,7 @@ impl eframe::App for TimeSnapperApp {
         self.entry_editor(&ctx);
         self.away_dialog(&ctx);
         self.break_dialog(&ctx);
+        self.breathing_window(&ctx);
         self.rename_dialog(&ctx);
         self.shortcuts_dialog(&ctx);
         if layout == WindowLayout::Normal && self.picker.is_some() {
@@ -1434,6 +1465,31 @@ impl TimeSnapperApp {
                 .weak()
                 .small(),
         );
+        if settings != self.data.settings {
+            self.data.settings = settings;
+            self.save();
+        }
+        ui.add_space(14.0);
+
+        ui.label(RichText::new("Åndedrætsøvelse").strong());
+        let mut settings = self.data.settings.clone();
+        egui::ComboBox::from_id_salt("breathing_exercise")
+            .width(ui.available_width() - 8.0)
+            .selected_text(settings.breathing_exercise.label())
+            .show_ui(ui, |ui| {
+                for exercise in Exercise::ALL {
+                    ui.selectable_value(&mut settings.breathing_exercise, exercise, exercise.label());
+                }
+            });
+        ui.horizontal(|ui| {
+            ui.label("Længde");
+            ui.radio_value(&mut settings.breathing_minutes, 1, "1 min");
+            ui.radio_value(&mut settings.breathing_minutes, 2, "2 min");
+        });
+        ui.checkbox(&mut settings.breathing_auto, "Start øvelsen, når jeg holder pause");
+        if ui.add_enabled(self.breathing.is_none(), egui::Button::new("💨 Prøv nu")).clicked() {
+            self.start_breathing();
+        }
         if settings != self.data.settings {
             self.data.settings = settings;
             self.save();

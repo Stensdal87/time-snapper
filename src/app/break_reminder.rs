@@ -124,6 +124,7 @@ impl TimeSnapperApp {
         let tip = TIPS[self.break_reminder.tip];
         enum Answer {
             Pause,
+            PauseBreathing,
             Snooze,
             Skip,
         }
@@ -140,6 +141,9 @@ impl TimeSnapperApp {
             ui.horizontal_wrapped(|ui| {
                 if ui.button("☕ Hold pause nu").on_hover_text("Enter").clicked() {
                     answer = Some(Answer::Pause);
+                }
+                if ui.button("💨 Pause med øvelse").on_hover_text("Hold pause og lav en kort åndedrætsøvelse").clicked() {
+                    answer = Some(Answer::PauseBreathing);
                 }
                 if ui.button("Om 10 min").on_hover_text("Esc").clicked() {
                     answer = Some(Answer::Snooze);
@@ -159,11 +163,14 @@ impl TimeSnapperApp {
         let now = Local::now();
         match answer {
             None => {}
-            Some(Answer::Pause) => {
+            Some(answer @ (Answer::Pause | Answer::PauseBreathing)) => {
                 self.break_reminder.prompt = None;
                 if !self.data.active.as_ref().is_some_and(|a| a.is_note(NOTE_PAUSE)) {
                     self.data.toggle_pause();
                     self.save();
+                }
+                if matches!(answer, Answer::PauseBreathing) {
+                    self.start_breathing();
                 }
             }
             Some(Answer::Snooze) => {

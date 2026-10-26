@@ -14,6 +14,7 @@ Det kan ligge øverst på skærmen uden at være i vejen.
 - Ret, slet og tilføj registreringer, og omdøb kunder og projekter
 - Eksportér en periode til Excel (.xlsx) eller CSV
 - Søgning i kunder og projekter, og højreklik for at udfolde/sammenklappe alle eller slette
+- Guidet åndedrætsøvelse i pauserne (boks 4-4-4-4, 4-7-8, 5-7-8 eller rolig ind/ud i 1 eller 2 minutter) i et lille vindue for sig, med en figur der følger rytmen
 - Pausepåmindelse: foreslår en kort pause, når du har arbejdet længe uden (interval indstilles i ☰-menuen)
 - Spørger om tiden skal være pause, når du har været væk fra computeren (indstilles i ☰-menuen)
 - Kan foldes sammen til en lille bjælke med tid og ikonknapper (som en mini-afspiller), der kan ligge i et hjørne af skærmen

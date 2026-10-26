@@ -196,6 +196,9 @@ impl TimeSnapperApp {
                     self.data.toggle_pause();
                     self.save();
                 }
+                if on_pause && self.breathing.is_none() && icon_button(ui, "💨", "Åndedrætsøvelse", true, false) {
+                    self.start_breathing();
+                }
                 if icon_button(ui, "📞", &call_hover, true, on_call) {
                     self.data.toggle_call();
                     self.save();

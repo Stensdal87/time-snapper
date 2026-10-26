@@ -210,6 +210,12 @@ pub struct Settings {
     /// Foreslå en kort pause, når man har arbejdet `break_minutes` uden.
     pub break_reminder: bool,
     pub break_minutes: u32,
+    /// Guidet åndedrætsøvelse i pauserne.
+    pub breathing_exercise: crate::app::breathing::Exercise,
+    /// Øvelsens længde i minutter (1 eller 2).
+    pub breathing_minutes: u32,
+    /// Start øvelsen af sig selv, når en pause begynder.
+    pub breathing_auto: bool,
     pub shortcuts: crate::shortcuts::Shortcuts,
 }
 
@@ -221,6 +227,9 @@ impl Default for Settings {
             close_to_tray: true,
             break_reminder: false,
             break_minutes: 60,
+            breathing_exercise: Default::default(),
+            breathing_minutes: 2,
+            breathing_auto: false,
             shortcuts: Default::default(),
         }
     }
