@@ -71,5 +71,5 @@ Data ligger i `~/.local/share/timesnapper/data.json` (på Windows i `%APPDATA%\T
 Når der pushes et tag `v*`, kører `.github/workflows/release.yml` tre jobs. `windows` laver Inno Setup-installeren og en portable exe. `linux` bygger på ubuntu-22.04 og laver `TimeSnapper-<ver>-linux-x86_64.tar.gz` med binær, ikon og `installer/linux/install.sh`/`uninstall.sh`, der installerer pr. bruger i `~/.local/bin` med `timesnapper.desktop`. `release` samler begge og opretter GitHub-releasen. På Linux sættes app-id `timesnapper` (WM_CLASS, matcher StartupWMClass). Det styrer også eframes gemmemappe, som er den samme som før. Husk at sætte `version` i Cargo.toml op sammen med tagget.
 
 ## Status
-- Under git (branch `main`). Ligger på GitHub som privat repo: https://github.com/Stensdal87/time-snapper
+- Under git (branch `main`). Ligger på GitHub som offentligt repo med MIT-licens: https://github.com/Stensdal87/time-snapper. Commits skal bruge den anonyme GitHub-adresse (`322234022+Stensdal87@users.noreply.github.com`, sat i repoets lokale git-config), ikke en privat e-mail. Historikken blev omskrevet med fast-export/fast-import for at fjerne en privat adresse, før repoet blev offentligt.
 - Første proof of concept er lavet. Mulige næste skridt: gendanne slettede, uge- og månedsoverblik, ikon i proceslinjen, Windows-build.

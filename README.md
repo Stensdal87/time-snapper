@@ -50,3 +50,7 @@ Alt gemmes lokalt i én JSON-fil:
 
 - Linux: `~/.local/share/timesnapper/data.json`
 - Windows: `%APPDATA%\TimeSnapper\data\data.json`
+
+## Licens
+
+[MIT](LICENSE)

@@ -3,6 +3,8 @@ name = "time_snapper"
 version = "0.6.0"
 edition = "2024"
 description = "Lille tidsregistreringsprogram til kunder og projekter"
+license = "MIT"
+repository = "https://github.com/Stensdal87/time-snapper"
 
 [dependencies]
 chrono = { version = "0.4.45", features = ["serde"] }
