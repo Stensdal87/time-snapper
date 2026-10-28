@@ -13,6 +13,10 @@ Det kan ligge øverst på skærmen uden at være i vejen.
 - Noter på tidsregistreringer, også med i historik og eksport
 - Ret, slet og tilføj registreringer, og omdøb kunder og projekter
 - Eksportér en periode til Excel (.xlsx) eller CSV
+- Sortering af kunder og projekter efter navn eller senest brugt
+- Skabelon for nye kunder (f.eks. Hotline og Support), evt. med et projekt der starter automatisk
+- Flyt den kørende tid til et andet projekt (⇄) uden at nulstille uret
+- Stopper tiden, når computeren går i dvale, og tilbyder at fortsætte bagefter
 - Søgning i kunder og projekter, og højreklik for at udfolde/sammenklappe alle eller slette
 - Guidet åndedrætsøvelse i pauserne (boks 4-4-4-4, 4-7-8, 5-7-8 eller rolig ind/ud i 1 eller 2 minutter) i et lille vindue for sig, med en figur der følger rytmen
 - Pausepåmindelse: foreslår en kort pause, når du har arbejdet længe uden (interval indstilles i ☰-menuen)

@@ -220,6 +220,28 @@ pub struct Settings {
     /// Start øvelsen af sig selv, når en pause begynder.
     pub breathing_auto: bool,
     pub shortcuts: crate::shortcuts::Shortcuts,
+    /// Projekter alle nye kunder får (issue #9).
+    pub customer_template: Vec<TemplateProject>,
+    /// Rækkefølge af kunder og projekter i listerne (issue #2).
+    pub sort: SortOrder,
+}
+
+/// Et projekt i kundeskabelonen.
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct TemplateProject {
+    pub name: String,
+    /// Tiden starter på dette projekt, når en ny kunde oprettes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_start: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default, Debug)]
+pub enum SortOrder {
+    /// Alfabetisk (dansk alfabet).
+    #[default]
+    Name,
+    /// Det senest brugte først.
+    Recent,
 }
 
 impl Default for Settings {
@@ -234,6 +256,8 @@ impl Default for Settings {
             breathing_minutes: 2,
             breathing_auto: false,
             shortcuts: Default::default(),
+            customer_template: Vec::new(),
+            sort: SortOrder::Name,
         }
     }
 }
@@ -326,12 +350,96 @@ impl Data {
         id
     }
 
-    /// Kunder der ikke er slettet.
-    /// Kunder der ikke er slettet: den interne kunde først, derefter alfabetisk.
+    /// Kunder der ikke er slettet: den interne kunde først, derefter efter
+    /// `settings.sort` (navn, eller senest brugt med de ubrugte bagerst).
     pub fn visible_customers(&self) -> impl Iterator<Item = &Customer> {
         let mut customers: Vec<&Customer> = self.customers.iter().filter(|c| !c.deleted).collect();
-        customers.sort_by_cached_key(|c| (!self.is_internal_customer(c.id), sort_key(&c.name)));
+        let last_used = |c: &Customer| {
+            self.projects.iter().filter(|p| p.customer_id == c.id).filter_map(|p| self.last_used(p.id)).max()
+        };
+        customers.sort_by_cached_key(|c| {
+            let recent = match self.settings.sort {
+                SortOrder::Recent => last_used(c).map(std::cmp::Reverse),
+                SortOrder::Name => None,
+            };
+            (!self.is_internal_customer(c.id), recent.is_none(), recent, sort_key(&c.name))
+        });
         customers.into_iter()
+    }
+
+    /// En kundes projekter (ikke slettede), efter `settings.sort`.
+    pub fn customer_projects(&self, customer_id: Id) -> Vec<&Project> {
+        let mut projects: Vec<&Project> =
+            self.visible_projects().filter(|p| p.customer_id == customer_id).collect();
+        projects.sort_by_cached_key(|p| {
+            let recent = match self.settings.sort {
+                SortOrder::Recent => self.last_used(p.id).map(std::cmp::Reverse),
+                SortOrder::Name => None,
+            };
+            (recent.is_none(), recent, sort_key(&p.name))
+        });
+        projects
+    }
+
+    /// Hvornår der sidst blev registreret tid på et projekt (eller nu, hvis det kører).
+    fn last_used(&self, project_id: Id) -> Option<DateTime<Local>> {
+        if self.active.as_ref().is_some_and(|a| a.project_id == Some(project_id)) {
+            return Some(Local::now());
+        }
+        self.entries.iter().filter(|e| e.project_id == project_id).map(|e| e.end).max()
+    }
+
+    /// Opretter en kunde med projekterne fra kundeskabelonen (issue #9).
+    /// Returnerer kunden og evt. det projekt, der er markeret Auto start.
+    pub fn create_customer(&mut self, name: &str) -> (Id, Option<Id>) {
+        let customer = self.add_customer(name);
+        let mut auto_start = None;
+        for template in self.settings.customer_template.clone() {
+            let name = template.name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let id = self.add_project(customer, name);
+            if template.auto_start && auto_start.is_none() {
+                auto_start = Some(id);
+            }
+        }
+        (customer, auto_start)
+    }
+
+    /// Flytter den kørende tidstagning til et andet projekt uden at nulstille
+    /// uret (issue #10). Et opkald bliver dermed registreret på projektet.
+    pub fn move_active(&mut self, project_id: Id) {
+        if let Some(active) = &mut self.active {
+            active.project_id = Some(project_id);
+            active.target = CallTarget::default();
+        }
+    }
+
+    /// Stopper tiden pr. `at`, f.eks. da computeren gik i dvale (issue #6).
+    /// Returnerer tidstagningen med uret frosset, så den kan genoptages.
+    pub fn suspend(&mut self, at: DateTime<Local>) -> Option<ActiveTimer> {
+        let active = self.active.as_ref()?;
+        let at = at.max(active.start);
+        let snapshot = ActiveTimer {
+            carried_secs: active.carried_secs + (at - active.start).num_seconds(),
+            ..active.clone()
+        };
+        self.stop_at(at);
+        Some(snapshot)
+    }
+
+    /// Genoptager en tidstagning fra `suspend`: samme projekt, note og type, og
+    /// uret tæller videre. Gør intet, hvis projektet er slettet i mellemtiden.
+    pub fn resume(&mut self, snapshot: ActiveTimer) {
+        if let Some(id) = snapshot.project_id
+            && !self.project(id).is_some_and(|p| !p.deleted)
+        {
+            return;
+        }
+        let now = Local::now();
+        self.stop();
+        self.active = Some(ActiveTimer { start: now, last_seen: now, ..snapshot });
     }
 
     /// Projekter der ikke er slettet.
@@ -608,7 +716,7 @@ impl Data {
         let existing = self.visible_customers().find(|c| same_name(&c.name, customer)).map(|c| c.id);
         let customer_id = match existing {
             Some(id) => id,
-            None => self.add_customer(customer),
+            None => self.create_customer(customer).0,
         };
         let existing = self
             .visible_projects()
@@ -1225,6 +1333,90 @@ mod tests {
 
         data.toggle_round_down(day, a); // 1:35 → 1:30 (ned) ; B 0:20 → 0:30 (op)
         assert_eq!(data.rounded_day_total(day), Some(Duration::minutes(120)));
+    }
+
+    #[test]
+    fn sort_by_name_or_recently_used() {
+        let mut data = Data::default();
+        let internal = data.internal_project_id();
+        let (alfa, beta) = (data.add_customer("Alfa"), data.add_customer("Beta"));
+        let (a1, a2) = (data.add_project(alfa, "Zebra"), data.add_project(alfa, "Abe"));
+        let b1 = data.add_project(beta, "Bjørn");
+        let names = |d: &Data| d.visible_customers().map(|c| c.name.clone()).collect::<Vec<_>>();
+        let projects = |d: &Data, c| d.customer_projects(c).iter().map(|p| p.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&data), ["Intern", "Alfa", "Beta"]);
+        assert_eq!(projects(&data, alfa), ["Abe", "Zebra"]);
+
+        let now = Local::now();
+        let entry = |id, mins: i64| TimeEntry {
+            project_id: id,
+            start: now - Duration::minutes(mins + 10),
+            end: now - Duration::minutes(mins),
+            ..Default::default()
+        };
+        data.add_entry(entry(a1, 60));
+        data.add_entry(entry(b1, 30));
+        data.add_entry(entry(a2, 90));
+        data.settings.sort = SortOrder::Recent;
+        assert_eq!(names(&data), ["Intern", "Beta", "Alfa"], "Beta brugt senest; Intern altid øverst");
+        assert_eq!(projects(&data, alfa), ["Zebra", "Abe"]);
+        let _ = internal;
+    }
+
+    #[test]
+    fn customer_template_creates_projects_and_auto_start() {
+        let mut data = Data::default();
+        data.settings.customer_template = vec![
+            TemplateProject { name: "Hotline".into(), auto_start: true },
+            TemplateProject { name: "Projekt".into(), auto_start: false },
+        ];
+        let (c, auto) = data.create_customer("Ny kunde");
+        let names: Vec<_> = data.customer_projects(c).iter().map(|p| p.name.clone()).collect();
+        assert_eq!(names, ["Hotline", "Projekt"]);
+        assert_eq!(data.project_label(auto.unwrap()), "Ny kunde / Hotline");
+
+        // Skrevet kunde+projekt i opkaldsdialogen genbruger skabelonens projekt.
+        let target = CallTarget { customer: "Anden kunde".into(), project: "hotline".into(), ..Default::default() };
+        let id = data.resolve_target(&target).unwrap();
+        assert_eq!(data.project_label(id), "Anden kunde / Hotline");
+    }
+
+    #[test]
+    fn move_active_keeps_the_clock() {
+        let mut data = Data::default();
+        let c = data.add_customer("Kunde");
+        let (a, b) = (data.add_project(c, "A"), data.add_project(c, "B"));
+        data.start(a);
+        data.active.as_mut().unwrap().start -= Duration::minutes(12);
+        data.move_active(b);
+        let active = data.active.as_ref().unwrap();
+        assert_eq!(active.project_id, Some(b));
+        assert_eq!(active.elapsed().num_minutes(), 12);
+        data.stop();
+        assert_eq!(data.entries.len(), 1);
+        assert_eq!(data.entries[0].project_id, b, "hele tiden på det nye projekt");
+    }
+
+    #[test]
+    fn suspend_stops_at_sleep_and_resume_continues() {
+        let mut data = Data::default();
+        let c = data.add_customer("Kunde");
+        let p = data.add_project(c, "A");
+        data.start(p);
+        let started = Local::now() - Duration::minutes(90);
+        let active = data.active.as_mut().unwrap();
+        active.start = started;
+        active.description = "Forside".into();
+        // Dvale 30 min efter start, vågner nu.
+        let snapshot = data.suspend(started + Duration::minutes(30)).unwrap();
+        assert!(data.active.is_none());
+        assert_eq!(data.entries[0].duration(), Duration::minutes(30), "dvaletiden tælles ikke med");
+
+        data.resume(snapshot);
+        let active = data.active.as_ref().unwrap();
+        assert_eq!(active.project_id, Some(p));
+        assert_eq!(active.description, "Forside");
+        assert_eq!(active.elapsed().num_minutes(), 30, "uret fortsætter fra før dvale");
     }
 
     #[test]

@@ -19,13 +19,21 @@ pub(super) enum WindowLayout {
     Picker,
 }
 
-/// Projektvælgeren, der åbnes med 🔀 i bjælken.
+/// Projektvælgeren, der åbnes med 🔀 i bjælken (eller Ctrl+K).
 #[derive(Default)]
 pub(super) struct ProjectPicker {
     search: String,
     new_customer: String,
     new_project: String,
     focused: bool,
+    /// Flyt den kørende tidstagning i stedet for at starte en ny (issue #10).
+    moving: bool,
+}
+
+impl ProjectPicker {
+    pub(super) fn moving() -> Self {
+        Self { moving: true, ..Default::default() }
+    }
 }
 
 /// En flytning af vinduet, som rettes til, hvis vinduesmanageren lægger
@@ -234,7 +242,7 @@ impl TimeSnapperApp {
         let mut close = false;
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Skift projekt").strong());
+            ui.label(RichText::new(if picker.moving { "Flyt tidstagningen til" } else { "Skift projekt" }).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 close |= ui.small_button("×").on_hover_text("Luk (Esc)").clicked();
             });
@@ -307,7 +315,11 @@ impl TimeSnapperApp {
             chosen = self.data.resolve_target(&target);
         }
         if let Some(id) = chosen {
-            self.data.start(id);
+            if picker.moving {
+                self.data.move_active(id);
+            } else {
+                self.data.start(id);
+            }
             self.save();
             close = true;
         }

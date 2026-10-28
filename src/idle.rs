@@ -25,6 +25,8 @@ pub enum IdleEvent {
     Away { since: DateTime<Local> },
     /// Input igen ved `at`.
     Back { at: DateTime<Local> },
+    /// Computeren har været i dvale fra `from` til `to`.
+    Slept { from: DateTime<Local>, to: DateTime<Local> },
 }
 
 pub struct IdleWatcher {
@@ -56,14 +58,13 @@ fn send(tx: &Sender<IdleEvent>, ctx: &egui::Context, event: IdleEvent) -> bool {
 /// sovet, har computeren sovet i mellemtiden.
 fn spawn_sleep_detector(tx: Sender<IdleEvent>, ctx: egui::Context) {
     std::thread::spawn(move || {
-        let tick = StdDuration::from_secs(10);
+        // Kort interval: det sidste tjek før dvale er dér, tiden stoppes.
+        let tick = StdDuration::from_secs(5);
         let mut last = Local::now();
         loop {
             std::thread::sleep(tick);
             let now = Local::now();
-            if now - last > SLEEP_GAP
-                && !(send(&tx, &ctx, IdleEvent::Away { since: last }) && send(&tx, &ctx, IdleEvent::Back { at: now }))
-            {
+            if now - last > SLEEP_GAP && !send(&tx, &ctx, IdleEvent::Slept { from: last, to: now }) {
                 return;
             }
             last = now;
