@@ -195,6 +195,9 @@ pub struct Data {
     /// Vinduets størrelse (skærmpunkter), før det blev foldet sammen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal_size: Option<[f32; 2]>,
+    /// Menuen ved siden af uret (dagens tid, projektets samlede tid) er åben.
+    #[serde(default)]
+    pub day_panel_open: bool,
 }
 
 /// Brugerens indstillinger (menuen ☰).
@@ -737,6 +740,24 @@ impl Data {
         }
     }
 
+    /// Al registreret tid en dag (inkl. den kørende timer).
+    pub fn day_total(&self, date: NaiveDate) -> Duration {
+        self.totals_on(date).iter().fold(Duration::zero(), |sum, (_, d)| sum + *d)
+    }
+
+    /// Dagens afrundede tid (summen pr. projekt som i Historik → Summeret), men
+    /// kun hvis der er rundet noget ned manuelt den dag; ellers `None`.
+    pub fn rounded_day_total(&self, date: NaiveDate) -> Option<Duration> {
+        let totals = self.totals_on(date);
+        let any_down = totals.iter().any(|(id, d)| self.rounded(date, *id, *d).down);
+        any_down.then(|| totals.iter().fold(Duration::zero(), |sum, (id, d)| sum + self.rounded(date, *id, *d).time))
+    }
+
+    /// Dagens tid på ét projekt (inkl. den kørende timer).
+    pub fn project_day_total(&self, date: NaiveDate, project_id: Id) -> Duration {
+        self.totals_on(date).into_iter().find(|(id, _)| *id == project_id).map_or(Duration::zero(), |(_, d)| d)
+    }
+
     /// Skifter mellem at runde projektets tid den dag op eller ned.
     pub fn toggle_round_down(&mut self, date: NaiveDate, project_id: Id) {
         let item = RoundDown { date, project_id };
@@ -1185,6 +1206,25 @@ mod tests {
         data.internal_project_id(); // opretter "Intern" sidst
         let names: Vec<&str> = data.visible_customers().map(|c| c.name.as_str()).collect();
         assert_eq!(names, ["Intern", "Alfa", "beta", "Zulu", "Ærø", "Øster", "Århus"]);
+    }
+
+    #[test]
+    fn day_totals_and_rounded_only_after_rounding_down() {
+        let mut data = Data::default();
+        let c = data.add_customer("Kunde");
+        let (a, b) = (data.add_project(c, "A"), data.add_project(c, "B"));
+        let day = NaiveDate::from_ymd_opt(2026, 10, 28).unwrap();
+        let at = |h, m| Local.from_local_datetime(&day.and_hms_opt(h, m, 0).unwrap()).unwrap();
+        data.add_entry(TimeEntry { project_id: a, start: at(8, 0), end: at(9, 5), ..Default::default() });
+        data.add_entry(TimeEntry { project_id: b, start: at(9, 5), end: at(9, 25), ..Default::default() });
+        data.add_entry(TimeEntry { project_id: a, start: at(10, 0), end: at(10, 30), ..Default::default() });
+
+        assert_eq!(data.day_total(day), Duration::minutes(115));
+        assert_eq!(data.project_day_total(day, a), Duration::minutes(95));
+        assert_eq!(data.rounded_day_total(day), None, "intet rundet ned");
+
+        data.toggle_round_down(day, a); // 1:35 → 1:30 (ned) ; B 0:20 → 0:30 (op)
+        assert_eq!(data.rounded_day_total(day), Some(Duration::minutes(120)));
     }
 
     #[test]

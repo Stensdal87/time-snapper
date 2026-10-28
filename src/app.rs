@@ -526,11 +526,48 @@ impl TimeSnapperApp {
     }
 
     /// Rundt ur: ringen fyldes én gang i timen, prikken går rundt én gang i minuttet.
-    fn round_timer(&self, ui: &mut egui::Ui) {
+    /// Rundt ur: ringen fyldes én gang i timen, prikken går rundt én gang i minuttet.
+    /// I midten den aktuelle tidstagning og under den dagens tid på projektet.
+    /// Til højre en menu, der kan foldes ud (dagens samlede tid og projektets
+    /// samlede tid); når den er ude, glider uret til venstre og gør plads.
+    fn round_timer(&mut self, ui: &mut egui::Ui) {
         let size = 150.0;
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
-        let painter = ui.painter_at(rect);
-        let center = rect.center();
+        let width = ui.available_width();
+        let (row, _) = ui.allocate_exact_size(Vec2::new(width, size), egui::Sense::hover());
+        let open = self.data.day_panel_open;
+        let t = ui.ctx().animate_bool_responsive(egui::Id::unique("day_panel"), open);
+        let (button_width, gap) = (18.0, 12.0);
+        let today = Local::now().date_naive();
+        let day_total = self.data.day_total(today);
+        let rounded = self.data.rounded_day_total(today);
+        let project_total = self.data.active.as_ref().and_then(|a| a.project_id).map(|id| self.data.project_total(id));
+
+        // Menuens tekster; menuen er præcis så bred som den længste, så uret og
+        // menuen kan centreres sammen.
+        let small = ui.style().text_styles[&egui::TextStyle::Small].clone();
+        let weak = ui.visuals().weak_text_color();
+        let mut panel_texts = vec![
+            ("I dag".to_owned(), small.clone()),
+            (format_duration(day_total), egui::FontId::monospace(16.0)),
+        ];
+        if let Some(rounded) = rounded {
+            panel_texts.push((format!("afrundet {}", format_hours_minutes(rounded)), small.clone()));
+        }
+        if let Some(total) = project_total {
+            panel_texts.push(("Projekt i alt".to_owned(), small.clone()));
+            panel_texts.push((format_duration(total), egui::FontId::monospace(13.0)));
+        }
+        let text_width = panel_texts
+            .iter()
+            .map(|(text, font)| ui.painter().layout_no_wrap(text.clone(), font.clone(), weak).size().x)
+            .fold(0.0, f32::max);
+        let panel_width = (text_width + 4.0).min((width - size - gap - button_width).max(40.0));
+        // Knappen står fast ved højre kant (så man ikke skal flytte musen for at
+        // folde menuen sammen igen); ur og menu centreres i pladsen ved siden af.
+        let group_width = size + gap + panel_width;
+        let open_left = row.left() + (width - button_width - group_width).max(0.0) / 2.0;
+        let center = Pos2::new(row.center().x, row.center().y).lerp(Pos2::new(open_left + size / 2.0, row.center().y), t);
+        let painter = ui.painter_at(row);
         let ring_width = 12.0;
         // Ringens midterlinje. Ring, bue og prik centreres alle om denne radius.
         let radius = size / 2.0 - ring_width / 2.0 - 1.0;
@@ -539,10 +576,10 @@ impl TimeSnapperApp {
         // egui tegner cirklers kant *udenfor* radius, så træk en halv ringbredde fra.
         painter.circle_stroke(center, radius - ring_width / 2.0, Stroke::new(ring_width, track));
 
-        let (elapsed, label, total) = match &self.data.active {
+        let (elapsed, label, today_on_project) = match &self.data.active {
             Some(a) => {
-                let (label, total) = match a.project_id {
-                    Some(id) => (self.data.project_label(id), Some(self.data.project_total(id))),
+                let (label, today_on_project) = match a.project_id {
+                    Some(id) => (self.data.project_label(id), Some(self.data.project_day_total(today, id))),
                     None => match self.target_label(&a.target) {
                         Some(target) => (format!("📞 {target}"), None),
                         None => ("📞 Telefonopkald".to_owned(), None),
@@ -552,7 +589,7 @@ impl TimeSnapperApp {
                     (Some(note), Some(_)) => format!("{label} ({note})"),
                     _ => label,
                 };
-                (a.elapsed(), label, total)
+                (a.elapsed(), label, today_on_project)
             }
             None => (Duration::zero(), String::new(), None),
         };
@@ -574,7 +611,7 @@ impl TimeSnapperApp {
         }
 
         let text_color = ui.visuals().strong_text_color();
-        let current_pos = if total.is_some() { center - Vec2::new(0.0, 8.0) } else { center };
+        let current_pos = if today_on_project.is_some() { center - Vec2::new(0.0, 8.0) } else { center };
         painter.text(
             current_pos,
             egui::Align2::CENTER_CENTER,
@@ -582,15 +619,58 @@ impl TimeSnapperApp {
             egui::FontId::monospace(24.0),
             text_color,
         );
-        if let Some(total) = total {
+        // Dagens tid på projektet.
+        if let Some(today_on_project) = today_on_project {
             painter.text(
                 center + Vec2::new(0.0, 16.0),
                 egui::Align2::CENTER_CENTER,
-                format!("I alt {}", format_duration(total)),
+                format!("I dag {}", format_duration(today_on_project)),
                 egui::FontId::monospace(12.0),
                 ui.visuals().weak_text_color(),
             );
         }
+
+        // Menuen til højre, som glider frem.
+        if t > 0.01 {
+            let panel_rect = egui::Rect::from_min_size(
+                Pos2::new(open_left + size + gap, row.top()),
+                Vec2::new(panel_width, size),
+            );
+            let mut panel = ui.new_child(
+                egui::UiBuilder::new().max_rect(panel_rect).layout(egui::Layout::top_down(egui::Align::Min)),
+            );
+            panel.set_opacity(t);
+            panel.set_clip_rect(panel_rect.expand(2.0));
+            let lines_height = 30.0 + if rounded.is_some() { 16.0 } else { 0.0 } + if project_total.is_some() { 42.0 } else { 0.0 };
+            panel.add_space(((size - lines_height) / 2.0).max(0.0));
+            panel.label(RichText::new("I dag").weak().small());
+            panel.label(RichText::new(format_duration(day_total)).monospace().size(16.0).strong());
+            if let Some(rounded) = rounded {
+                panel
+                    .label(RichText::new(format!("afrundet {}", format_hours_minutes(rounded))).small().color(panel.visuals().warn_fg_color))
+                    .on_hover_text("Med de afrundinger du har lavet i Historik → Summeret");
+            }
+            if let Some(total) = project_total {
+                panel.add_space(8.0);
+                panel.label(RichText::new("Projekt i alt").weak().small());
+                panel.label(RichText::new(format_duration(total)).monospace().size(13.0));
+            }
+        }
+
+        // Knappen der folder menuen ud og ind, ved højre kant.
+        let button_rect = egui::Rect::from_center_size(
+            Pos2::new(row.right() - button_width / 2.0, row.center().y),
+            Vec2::new(button_width, 44.0),
+        );
+        let (icon, hover) = if open { ("›", "Skjul dagens tid") } else { ("‹", "Vis dagens tid og projektets samlede tid") };
+        // I sit eget lille område (`put` ville flytte placeringen af det, der kommer under uret).
+        let mut button_ui = ui.new_child(egui::UiBuilder::new().max_rect(button_rect));
+        let button = egui::Button::new(RichText::new(icon).size(18.0)).min_size(button_rect.size());
+        if button_ui.add(button).on_hover_text(hover).clicked() {
+            self.data.day_panel_open = !open;
+            self.save();
+        }
+
         if !label.is_empty() {
             ui.label(RichText::new(label).strong());
         }
