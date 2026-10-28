@@ -32,16 +32,16 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Luk et kørende Time Snapper ved opdatering.
 CloseApplications=yes
-; Husk ikke valgene fra sidste installation: automatisk start styres inde i
-; programmet, og en opdatering må ikke slå den til igen.
-UsePreviousTasks=no
+; Valgene fra sidste installation (f.eks. skrivebordsikon) huskes ved opdatering.
+; Automatisk start vises kun ved første installation (se IsUpgrade): derefter
+; styres den inde i programmet, og en opdatering må hverken slå den til eller fra.
 
 [Languages]
 Name: "danish"; MessagesFile: "compiler:Languages\Danish.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Start Time Snapper, når jeg logger på Windows"; GroupDescription: "Andet:"; Flags: unchecked
+Name: "autostart"; Description: "Start Time Snapper, når jeg logger på Windows"; GroupDescription: "Andet:"; Flags: unchecked; Check: not IsUpgrade
 
 [Files]
 Source: "..\target\release\time_snapper.exe"; DestDir: "{app}"; DestName: "TimeSnapper.exe"; Flags: ignoreversion
@@ -64,6 +64,15 @@ Type: files; Name: "{userstartup}\Time Snapper.lnk"
 Filename: "{app}\TimeSnapper.exe"; Description: "{cm:LaunchProgram,Time Snapper}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+// Er Time Snapper installeret i forvejen? (Afinstallationsnøglen fra AppId.)
+function IsUpgrade: Boolean;
+var
+  Key: String;
+begin
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{421CB1D1-D7AC-49F7-8A0A-E05F04F75468}_is1';
+  Result := RegKeyExists(HKEY_CURRENT_USER, Key) or RegKeyExists(HKEY_LOCAL_MACHINE, Key);
+end;
+
 // Fjern automatisk start ved afinstallation, også hvis den er slået til inde i programmet.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin

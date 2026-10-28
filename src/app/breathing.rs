@@ -277,6 +277,52 @@ fn figure(phases: &[(Phase, f32)]) -> Vec<Pos2> {
     points.iter().map(|p| ((*p - min) * scale + offset).to_pos2()).collect()
 }
 
+/// Siderne som linjestykker med runde hjørner. Side i starter midt i hjørne
+/// i's bue og slutter midt i hjørne i+1's bue, så hvert hjørne deles mellem de
+/// to sider (og deres farver). `radius` 0 giver skarpe hjørner.
+fn rounded_edges(corners: &[Pos2], radius: f32) -> Vec<Vec<Pos2>> {
+    let n = corners.len();
+    // Hvert hjørnes bue (en kvadratisk Bézier-kurve) delt i to halvdele.
+    let halves: Vec<(Vec<Pos2>, Vec<Pos2>)> = (0..n)
+        .map(|k| {
+            let (prev, corner, next) = (corners[(k + n - 1) % n], corners[k], corners[(k + 1) % n]);
+            let (to_prev, to_next) = (prev - corner, next - corner);
+            let r = radius.min(to_prev.length() * 0.45).min(to_next.length() * 0.45);
+            let (start, end) = (corner + to_prev.normalized() * r, corner + to_next.normalized() * r);
+            let curve: Vec<Pos2> = (0..=8)
+                .map(|j| {
+                    let t = j as f32 / 8.0;
+                    let point = start.to_vec2() * (1.0 - t).powi(2)
+                        + corner.to_vec2() * (2.0 * (1.0 - t) * t)
+                        + end.to_vec2() * t.powi(2);
+                    point.to_pos2()
+                })
+                .collect();
+            (curve[..=4].to_vec(), curve[4..].to_vec())
+        })
+        .collect();
+    (0..n).map(|i| [halves[i].1.clone(), halves[(i + 1) % n].0.clone()].concat()).collect()
+}
+
+/// Stykket af en linje fra starten til `fraction` af dens længde, og punktet dér.
+fn along(points: &[Pos2], fraction: f32) -> (Vec<Pos2>, Pos2) {
+    let total: f32 = points.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+    let mut left = total * fraction.clamp(0.0, 1.0);
+    let mut walked = vec![points[0]];
+    for w in points.windows(2) {
+        let step = (w[1] - w[0]).length();
+        if left <= step && step > 0.0 {
+            let dot = w[0] + (w[1] - w[0]) * (left / step);
+            walked.push(dot);
+            return (walked, dot);
+        }
+        left -= step;
+        walked.push(w[1]);
+    }
+    let end = *points.last().unwrap_or(&points[0]);
+    (walked, end)
+}
+
 /// Figuren med prikken, der følger siderne, og cirklen der "trækker vejret".
 /// `None` er gør-klar-trinnet (cirklen lille, prikken i startpunktet).
 fn draw_box(ui: &mut egui::Ui, exercise: Exercise, at: Option<(usize, Phase, f32, f32)>) {
@@ -299,31 +345,30 @@ fn draw_box(ui: &mut egui::Ui, exercise: Exercise, at: Option<(usize, Phase, f32
     };
     let corners: Vec<Pos2> = unit.into_iter().map(place).collect();
     let n = corners.len();
-    let edge = |i: usize| (corners[i % n], corners[(i + 1) % n]);
+    // Hver side som en linje med halvdelen af de runde hjørner i hver ende.
+    let edges = rounded_edges(&corners, if is_line { 0.0 } else { 12.0 });
     let track = ui.visuals().widgets.inactive.bg_fill;
     let width = 4.0;
+    let line = |points: Vec<Pos2>, color: Color32| egui::Shape::line(points, Stroke::new(width, color));
 
     // Hele figuren svagt i fasernes farver, så rytmen kan ses.
-    for (i, (phase, _)) in phases.iter().enumerate() {
-        let (a, b) = edge(i);
-        painter.line_segment([a, b], Stroke::new(width, track));
-        painter.line_segment([a, b], Stroke::new(width, phase.color().gamma_multiply(0.15)));
+    for (points, (phase, _)) in edges.iter().zip(phases) {
+        painter.add(line(points.clone(), track));
+        painter.add(line(points.clone(), phase.color().gamma_multiply(0.15)));
     }
 
     let (index, phase, progress, left) = at.unwrap_or((0, Phase::In, 0.0, 0.0));
     let eased = (1.0 - (progress * PI).cos()) / 2.0;
     let color = phase.color();
     if at.is_some() {
-        for (i, (done, _)) in phases.iter().enumerate().take(index) {
-            let (a, b) = edge(i);
-            painter.line_segment([a, b], Stroke::new(width, done.color().gamma_multiply(0.5)));
+        for (points, (done, _)) in edges.iter().zip(phases).take(index) {
+            painter.add(line(points.clone(), done.color().gamma_multiply(0.5)));
         }
-        let (from, to) = edge(index);
-        let dot = from + (to - from) * progress;
-        painter.line_segment([from, dot], Stroke::new(width, color));
+        let (walked, dot) = along(&edges[index], progress);
+        painter.add(line(walked, color));
         painter.circle_filled(dot, 8.0, Color32::WHITE);
     } else {
-        painter.circle_filled(corners[0], 8.0, Color32::WHITE);
+        painter.circle_filled(edges[0][0], 8.0, Color32::WHITE);
     }
 
     // Cirklen: lille når lungerne er tomme, stor når de er fulde. I en trekant
@@ -429,6 +474,21 @@ mod tests {
         let hold = p[0] - p[2];
         assert!(out.y > 0.0, "ud går nedad");
         assert!(hold.x < 0.0 && hold.y.abs() < 1e-4, "hold går vandret tilbage langs bunden");
+    }
+
+    #[test]
+    fn rounded_edges_join_up_and_dot_walks_along() {
+        let square = [Pos2::new(0.0, 100.0), Pos2::new(0.0, 0.0), Pos2::new(100.0, 0.0), Pos2::new(100.0, 100.0)];
+        let edges = rounded_edges(&square, 12.0);
+        for i in 0..4 {
+            let (end, next_start) = (*edges[i].last().unwrap(), edges[(i + 1) % 4][0]);
+            assert!((end - next_start).length() < 1e-3, "siderne hænger sammen i hjørnerne");
+        }
+        // Midt på venstre side ligger prikken på den lige linje.
+        let (_, dot) = along(&edges[0], 0.5);
+        assert!(dot.x.abs() < 1e-3 && (dot.y - 50.0).abs() < 1.0, "{dot:?}");
+        // Skarpe hjørner med radius 0.
+        assert_eq!(rounded_edges(&square, 0.0)[0][0], square[0]);
     }
 
     #[test]

@@ -461,9 +461,6 @@ impl TimeSnapperApp {
                                 }
                             });
                         }
-                        if searching {
-                            return;
-                        }
                         ui.horizontal(|ui| {
                             let text = self.new_project.entry(customer.id).or_default();
                             let response = ui.add(
@@ -970,7 +967,22 @@ impl TimeSnapperApp {
             .resizable(false)
             .drag_to_open(false)
             .exact_size(210.0)
-            .show_collapsible(ui, &mut settings_open, |ui| self.settings_panel(ui, ctx));
+            .show_collapsible(ui, &mut settings_open, |ui| {
+                // Indstillingerne er højere end et lavt vindue; scroll i stedet for at skære af.
+                // En fast scrollbar: egui's standard ("flydende") er usynlig, indtil musen
+                // er over den, så man ikke kan se, at der er mere.
+                ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+                egui::ScrollArea::vertical()
+                    .auto_shrink(false)
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                    .show(ui, |ui| {
+                        // Hold indholdet inden for panelet (ellers skubber de brede
+                        // skydere scrollbaren ud over kanten, hvor den ikke ses).
+                        ui.set_max_width(ui.available_width());
+                        ui.spacing_mut().slider_width = 80.0;
+                        self.settings_panel(ui, ctx);
+                    });
+            });
         self.settings_open = settings_open;
 
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
@@ -1532,10 +1544,9 @@ impl TimeSnapperApp {
             self.save();
         }
 
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            ui.add_space(4.0);
-            ui.label(RichText::new(format!("Time Snapper {}", env!("CARGO_PKG_VERSION"))).weak().small());
-        });
+        ui.add_space(20.0);
+        ui.label(RichText::new(format!("Time Snapper {}", env!("CARGO_PKG_VERSION"))).weak().small());
+        ui.add_space(4.0);
     }
 
     fn handle_idle_events(&mut self) {
