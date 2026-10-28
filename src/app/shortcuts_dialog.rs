@@ -38,19 +38,19 @@ impl TimeSnapperApp {
         let modal = egui::Modal::new(egui::Id::unique("shortcuts_dialog")).show(ctx, |ui| {
             // Skal kunne være i programmets smalle standardvindue (320 px).
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(260.0, 360.0));
-            ui.heading("⌨ Genvejstaster");
+            ui.heading(tr!("shortcuts.title"));
             ui.label(
-                RichText::new("Klik på en genvej og tryk de nye taster. Delete fjerner genvejen, Esc fortryder.")
+                RichText::new(tr!("shortcuts.help"))
                     .weak()
                     .small(),
             );
             ui.add_space(6.0);
 
             egui::Grid::new("shortcuts").num_columns(3).spacing([6.0, 4.0]).striped(true).show(ui, |ui| {
-                ui.label(RichText::new("Handling").strong());
-                ui.label(RichText::new("I programmet").strong());
-                ui.label(RichText::new("Global").strong())
-                    .on_hover_text("Virker også når et andet program har fokus");
+                ui.label(RichText::new(tr!("shortcuts.col_action")).strong());
+                ui.label(RichText::new(tr!("shortcuts.col_local")).strong());
+                ui.label(RichText::new(tr!("shortcuts.col_global")).strong())
+                    .on_hover_text(tr!("shortcuts.col_global_hint"));
                 ui.end_row();
 
                 for action in Action::ALL {
@@ -63,7 +63,7 @@ impl TimeSnapperApp {
                         ui.label("");
                     } else if !globals_supported {
                         ui.label(RichText::new("Windows").weak().small())
-                            .on_hover_text("Globale genveje på Linux kommer senere");
+                            .on_hover_text(tr!("shortcuts.linux_later"));
                     } else {
                         let global = self.data.settings.shortcuts.global(action);
                         ui.horizontal(|ui| {
@@ -85,14 +85,14 @@ impl TimeSnapperApp {
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Nulstil til standard").clicked() {
+                if ui.button(tr!("shortcuts.reset")).clicked() {
                     self.data.settings.shortcuts.reset();
                     self.save();
                     self.refresh_global_hotkeys(false);
                     dialog.message = None;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close |= ui.button("Luk").clicked();
+                    close |= ui.button(tr!("common.close")).clicked();
                 });
             });
         });
@@ -117,7 +117,7 @@ impl TimeSnapperApp {
     /// Tjekker at en ny genvej kan bruges.
     fn check_shortcut(&self, action: Action, global: bool, combo: KeyCombo) -> Result<(), String> {
         if !combo.has_modifier() && !combo.is_function_key() {
-            return Err(format!("{combo} skal kombineres med Ctrl, Alt eller Shift (F-taster kan stå alene)."));
+            return Err(tr!("shortcuts.err_modifier", combo = combo));
         }
         let shortcuts = &self.data.settings.shortcuts;
         let conflict = if global {
@@ -126,7 +126,7 @@ impl TimeSnapperApp {
             shortcuts.local_conflict(combo, action)
         };
         match conflict {
-            Some(other) => Err(format!("{combo} bruges allerede til \"{}\".", other.label())),
+            Some(other) => Err(tr!("shortcuts.err_taken", combo = combo, action = other.label())),
             None => Ok(()),
         }
     }
@@ -153,7 +153,7 @@ impl TimeSnapperApp {
 /// En knap der viser genvejen, eller "Tryk taster…" mens den optages.
 fn shortcut_cell(ui: &mut egui::Ui, combo: Option<KeyCombo>, recording: bool) -> egui::Response {
     let text = if recording {
-        RichText::new("Tryk taster…").small().color(ui.visuals().warn_fg_color)
+        RichText::new(tr!("shortcuts.press_keys")).small().color(ui.visuals().warn_fg_color)
     } else {
         match combo {
             Some(combo) => RichText::new(combo.to_string()).small(),

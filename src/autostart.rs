@@ -19,7 +19,7 @@ pub fn migrate_old_shortcut() {
 }
 
 pub fn set_enabled(enabled: bool) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| format!("Kunne ikke finde programfilen: {e}"))?;
+    let exe = std::env::current_exe().map_err(|e| tr!("autostart.err_exe", error = e))?;
     platform::set_enabled(enabled, &exe)
 }
 
@@ -75,7 +75,7 @@ mod platform {
         if let Some(shortcut) = old_shortcut()
             && shortcut.exists()
         {
-            std::fs::remove_file(&shortcut).map_err(|e| format!("Kunne ikke fjerne den gamle genvej: {e}"))?;
+            std::fs::remove_file(&shortcut).map_err(|e| tr!("autostart.err_old_shortcut", error = e))?;
         }
         let (key, value) = (wide(RUN_KEY), wide(VALUE));
         let result = if enabled {
@@ -100,7 +100,7 @@ mod platform {
         if result == ERROR_SUCCESS {
             Ok(())
         } else {
-            Err(format!("Kunne ikke ændre automatisk start (Windows-fejl {result})"))
+            Err(tr!("autostart.err_windows", code = result))
         }
     }
 }
@@ -135,10 +135,10 @@ mod platform {
     }
 
     pub fn set_enabled(enabled: bool, exe: &Path) -> Result<(), String> {
-        let path = desktop_file().ok_or("Kunne ikke finde mappen ~/.config/autostart")?;
+        let path = desktop_file().ok_or_else(|| tr!("autostart.err_folder"))?;
         if !enabled {
             return match std::fs::remove_file(&path) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("Kunne ikke slå automatisk start fra: {e}")),
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(tr!("autostart.err_disable", error = e)),
                 _ => Ok(()),
             };
         }
@@ -147,9 +147,9 @@ mod platform {
             quote_exec(exe)
         );
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("Kunne ikke oprette {}: {e}", dir.display()))?;
+            std::fs::create_dir_all(dir).map_err(|e| tr!("autostart.err_create", path = dir.display(), error = e))?;
         }
-        std::fs::write(&path, content).map_err(|e| format!("Kunne ikke slå automatisk start til: {e}"))
+        std::fs::write(&path, content).map_err(|e| tr!("autostart.err_enable", error = e))
     }
 
     #[cfg(test)]

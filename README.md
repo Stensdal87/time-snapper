@@ -25,6 +25,7 @@ Det kan ligge øverst på skærmen uden at være i vejen.
 - Genvejstaster i programmet og globale genveje på Windows (fx pause eller telefon fra et hvilket som helst program). Kan ændres i ☰-menuen
 - Ikon i systembakken: start, skift projekt, pause og stop uden at vise vinduet
 - Kan starte automatisk, når du logger på (slås til/fra i ☰-menuen)
+- Dansk og engelsk (vælges i ☰-menuen; følger systemets sprog som standard)
 - Lyst/mørkt tema, "hold øverst", og programmet husker vinduets størrelse og placering
 
 ## Byg og kør

@@ -65,21 +65,21 @@ impl EntryEditor {
 
     /// Registreringen som felterne beskriver den, eller hvad der er galt.
     fn build(&self) -> Result<TimeEntry, String> {
-        let project_id = self.project_id.ok_or("Vælg et projekt")?;
-        let date = parse_date(&self.date).ok_or("Ugyldig dato (brug dd-mm-åååå)")?;
+        let project_id = self.project_id.ok_or_else(|| tr!("editor.err_project"))?;
+        let date = parse_date(&self.date).ok_or_else(|| tr!("editor.err_date"))?;
         let original = self.original.as_ref();
         let unchanged_date = original.is_some_and(|o| o.start.date_naive() == date);
 
         let start = match original {
             Some(o) if unchanged_date && self.start == o.start.format("%H:%M").to_string() => o.start,
-            _ => to_local(date, parse_time(&self.start).ok_or("Ugyldig fra-tid (brug tt:mm)")?)?,
+            _ => to_local(date, parse_time(&self.start).ok_or_else(|| tr!("editor.err_from"))?)?,
         };
         let end = match original {
             Some(o) if unchanged_date && self.end == o.end.format("%H:%M").to_string() => o.end,
-            _ => to_local(date, parse_time(&self.end).ok_or("Ugyldig til-tid (brug tt:mm)")?)?,
+            _ => to_local(date, parse_time(&self.end).ok_or_else(|| tr!("editor.err_to"))?)?,
         };
         if end <= start {
-            return Err("Til-tiden skal være efter fra-tiden".to_owned());
+            return Err(tr!("editor.err_order"));
         }
         Ok(TimeEntry { project_id, start, end, note: self.note.clone(), description: self.description.trim().to_owned() })
     }
@@ -90,38 +90,38 @@ impl EntryEditor {
 
         let modal = egui::Modal::new(egui::Id::unique("entry_editor")).show(ctx, |ui| {
             ui.set_width(280.0);
-            ui.heading(if self.index.is_some() { "✏ Ret registrering" } else { "➕ Ny registrering" });
+            ui.heading(if self.index.is_some() { tr!("editor.title_edit") } else { tr!("editor.title_new") });
             ui.add_space(4.0);
 
             egui::Grid::new("entry_fields").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-                ui.label("Projekt");
+                ui.label(tr!("editor.project"));
                 self.project_combo(ui, data);
                 ui.end_row();
 
-                ui.label("Type");
+                ui.label(tr!("editor.type"));
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.note, None, "Normal");
-                    ui.selectable_value(&mut self.note, Some(NOTE_PHONE.to_owned()), "📞 Telefon");
-                    ui.selectable_value(&mut self.note, Some(NOTE_PAUSE.to_owned()), "☕ Pause");
+                    ui.selectable_value(&mut self.note, None, tr!("editor.type_normal"));
+                    ui.selectable_value(&mut self.note, Some(NOTE_PHONE.to_owned()), tr!("editor.type_phone"));
+                    ui.selectable_value(&mut self.note, Some(NOTE_PAUSE.to_owned()), tr!("editor.type_pause"));
                 });
                 ui.end_row();
 
-                ui.label("Dato");
-                ui.add(egui::TextEdit::singleline(&mut self.date).hint_text("dd-mm-åååå").desired_width(100.0));
+                ui.label(tr!("editor.date"));
+                ui.add(egui::TextEdit::singleline(&mut self.date).hint_text(tr!("editor.date_hint")).desired_width(100.0));
                 ui.end_row();
 
-                ui.label("Tid");
+                ui.label(tr!("editor.time"));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.start).hint_text("fra").desired_width(50.0));
+                    ui.add(egui::TextEdit::singleline(&mut self.start).hint_text(tr!("editor.from")).desired_width(50.0));
                     ui.label("–");
-                    ui.add(egui::TextEdit::singleline(&mut self.end).hint_text("til").desired_width(50.0));
+                    ui.add(egui::TextEdit::singleline(&mut self.end).hint_text(tr!("editor.to")).desired_width(50.0));
                 });
                 ui.end_row();
 
-                ui.label("Note");
+                ui.label(tr!("editor.note"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.description)
-                        .hint_text("Hvad er tiden brugt på?")
+                        .hint_text(tr!("editor.note_hint"))
                         .desired_width(200.0),
                 );
                 ui.end_row();
@@ -130,10 +130,10 @@ impl EntryEditor {
             ui.add_space(4.0);
             match &built {
                 Ok(entry) => {
-                    ui.label(format!("Varighed: {}", format_duration(entry.duration())));
+                    ui.label(tr!("editor.duration", duration = format_duration(entry.duration())));
                     let overlaps = data.overlapping(entry, self.index);
                     if !overlaps.is_empty() {
-                        ui.colored_label(ui.visuals().warn_fg_color, "⚠ Overlapper med:");
+                        ui.colored_label(ui.visuals().warn_fg_color, tr!("editor.overlaps"));
                         for o in overlaps {
                             ui.label(
                                 RichText::new(format!(
@@ -154,16 +154,16 @@ impl EntryEditor {
             ui.add_space(8.0);
 
             if self.confirm_delete {
-                ui.label(RichText::new("Er du sikker på, at du vil slette registreringen?").strong());
+                ui.label(RichText::new(tr!("editor.confirm_delete")).strong());
                 ui.horizontal(|ui| {
-                    let yes = egui::Button::new(RichText::new("🗑 Ja, slet").color(Color32::WHITE))
+                    let yes = egui::Button::new(RichText::new(tr!("editor.yes_delete")).color(Color32::WHITE))
                         .fill(Color32::from_rgb(200, 60, 60));
                     if ui.add(yes).clicked()
                         && let Some(index) = self.index
                     {
                         action = EditorAction::Delete(index);
                     }
-                    if ui.button("Nej").clicked() {
+                    if ui.button(tr!("common.no")).clicked() {
                         self.confirm_delete = false;
                     }
                 });
@@ -171,15 +171,15 @@ impl EntryEditor {
             }
 
             ui.horizontal(|ui| {
-                if ui.add_enabled(built.is_ok(), egui::Button::new("✔ Gem")).on_hover_text("Enter").clicked() {
+                if ui.add_enabled(built.is_ok(), egui::Button::new(tr!("common.save"))).on_hover_text("Enter").clicked() {
                     action = save(self.index, &built);
                 }
-                if ui.button("Annuller").on_hover_text("Esc").clicked() {
+                if ui.button(tr!("common.cancel")).on_hover_text("Esc").clicked() {
                     action = EditorAction::Cancel;
                 }
                 if self.index.is_some() {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("🗑 Slet").clicked() {
+                        if ui.button(tr!("common.delete")).clicked() {
                             self.confirm_delete = true;
                         }
                     });
@@ -197,7 +197,7 @@ impl EntryEditor {
     }
 
     fn project_combo(&mut self, ui: &mut egui::Ui, data: &Data) {
-        let selected = self.project_id.map_or_else(|| "Vælg projekt…".to_owned(), |id| data.project_label(id));
+        let selected = self.project_id.map_or_else(|| tr!("editor.choose_project"), |id| data.project_label(id));
         // Et slettet projekt kan stadig vælges for registreringer, der allerede ligger på det.
         let current_deleted = self.project_id.filter(|id| data.project(*id).is_some_and(|p| p.deleted));
         let mut ids: Vec<Id> = data.visible_projects().map(|p| p.id).collect();
@@ -227,7 +227,7 @@ fn to_local(date: NaiveDate, time: NaiveTime) -> Result<DateTime<Local>, String>
     Local
         .from_local_datetime(&date.and_time(time))
         .earliest()
-        .ok_or_else(|| "Klokkeslættet findes ikke (sommertid)".to_owned())
+        .ok_or_else(|| tr!("editor.err_dst"))
 }
 
 /// Accepterer "8:30", "08:30", "8.30", "0830", "830" og "8".

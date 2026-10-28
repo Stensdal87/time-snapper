@@ -23,7 +23,7 @@ use compact::{PendingMove, ProjectPicker, WindowLayout};
 use shortcuts_dialog::ShortcutsDialog;
 use crate::hotkeys::GlobalHotkeys;
 use crate::shortcuts::Action;
-use crate::data::{ActiveTimer, SortOrder, TemplateProject, format_duration, DayEntry, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
+use crate::data::{format_length, note_label, ActiveTimer, SortOrder, TemplateProject, format_duration, DayEntry, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
 const HEARTBEAT: StdDuration = StdDuration::from_secs(30);
@@ -61,6 +61,8 @@ enum HistoryView {
 
 pub struct TimeSnapperApp {
     data: Data,
+    /// Beskeder fra en ny kopi af programmet, der blev startet (den lukker selv).
+    instance: Option<crate::single_instance::Instance>,
     path: PathBuf,
     error: Option<String>,
     tab: Tab,
@@ -154,6 +156,7 @@ impl TimeSnapperApp {
         };
         let mut app = Self {
             data,
+            instance: None,
             path,
             error,
             tab: Tab::Timer,
@@ -201,6 +204,8 @@ impl TimeSnapperApp {
             sleep_prompt: None,
             new_template_project: String::new(),
         };
+        crate::i18n::apply(app.data.settings.language);
+        app.data.localize_internal_names();
         app.hotkeys = GlobalHotkeys::start(ctx, app.data.settings.shortcuts.globals());
         // Var vinduet foldet sammen ved sidste lukning, har det allerede den lille
         // størrelse; den normale størrelse er gemt for sig.
@@ -296,7 +301,7 @@ impl TimeSnapperApp {
 
     fn timer_tab(&mut self, ui: &mut egui::Ui) {
         if !self.call_dialog_open && !self.data.unassigned.is_empty() {
-            let text = format!("📞 {} opkald mangler registrering", self.data.unassigned.len());
+            let text = tr!("timer.calls_waiting", count = self.data.unassigned.len());
             if ui
                 .add(egui::Button::new(RichText::new(text).color(Color32::BLACK)).fill(Color32::from_rgb(240, 190, 80)))
                 .clicked()
@@ -307,7 +312,7 @@ impl TimeSnapperApp {
         ui.vertical_centered(|ui| {
             self.round_timer(ui);
             if self.data.active.is_none() {
-                ui.label(RichText::new("Vælg et projekt for at starte").weak());
+                ui.label(RichText::new(tr!("timer.choose_project")).weak());
             }
         });
         ui.add_space(4.0);
@@ -320,12 +325,9 @@ impl TimeSnapperApp {
         let pause_hint = self.shortcut_hint(Action::Pause);
         let resume_label = self.data.resume_project().map(|id| self.data.project_label(id));
         let (call_text, call_hover) = match (on_call, &resume_label) {
-            (true, Some(label)) => ("📞 Afslut", format!("Afslut opkaldet og fortsæt på {label}{call_hint}")),
-            (true, None) => ("📞 Afslut", format!("Afslut opkaldet{call_hint}")),
-            (false, _) => (
-                "📞 Telefon",
-                format!("Start tid på et opkald. Tryk igen for at afslutte og fortsætte, hvor du slap.{call_hint}"),
-            ),
+            (true, Some(label)) => (tr!("timer.end_call"), format!("{}{call_hint}", tr!("timer.end_call_resume_hint", project = label))),
+            (true, None) => (tr!("timer.end_call"), format!("{}{call_hint}", tr!("timer.end_call_hint"))),
+            (false, _) => (tr!("timer.phone"), format!("{}{call_hint}", tr!("timer.phone_hint"))),
         };
         ui.columns(3, |cols| {
             let size = [cols[0].available_width(), 26.0];
@@ -339,13 +341,13 @@ impl TimeSnapperApp {
             let (pause_text, pause_hover) = if on_pause {
                 match self.data.resume_project() {
                     Some(id) => (
-                        "▶ Fortsæt".to_owned(),
-                        format!("Afslut pausen og fortsæt på {}{pause_hint}", self.data.project_label(id)),
+                        tr!("timer.resume"),
+                        format!("{}{pause_hint}", tr!("timer.resume_hint", project = self.data.project_label(id))),
                     ),
-                    None => ("☕ Afslut pause".to_owned(), format!("Afslut pausen og stop tiden{pause_hint}")),
+                    None => (tr!("timer.end_break"), format!("{}{pause_hint}", tr!("timer.end_break_hint"))),
                 }
             } else {
-                ("☕ Pause".to_owned(), format!("Registreres på Intern tid. Tryk igen for at fortsætte, hvor du slap.{pause_hint}"))
+                (tr!("timer.break"), format!("{}{pause_hint}", tr!("timer.break_hint")))
             };
             // Almindelig knap som de andre; markeret mens pausen kører.
             let pause_button = if on_pause {
@@ -362,8 +364,8 @@ impl TimeSnapperApp {
                 self.save();
             }
             if cols[2]
-                .add_enabled(running, egui::Button::new("⏹ Stop").min_size(size.into()))
-                .on_hover_text(format!("Stop tiden{stop_hint}"))
+                .add_enabled(running, egui::Button::new(tr!("timer.stop")).min_size(size.into()))
+                .on_hover_text(format!("{}{stop_hint}", tr!("timer.stop_hint")))
                 .clicked()
             {
                 self.data.stop();
@@ -372,9 +374,9 @@ impl TimeSnapperApp {
         });
         if on_pause {
             ui.add_space(4.0);
-            let label = if self.breathing.is_some() { "💨 Åndedrætsøvelse kører…" } else { "💨 Åndedrætsøvelse" };
+            let label = if self.breathing.is_some() { tr!("timer.breathing_running") } else { tr!("timer.breathing") };
             let button = egui::Button::new(label).min_size(Vec2::new(ui.available_width(), 26.0));
-            if ui.add_enabled(self.breathing.is_none(), button).on_hover_text("En kort guidet vejrtrækning i et lille vindue").clicked() {
+            if ui.add_enabled(self.breathing.is_none(), button).on_hover_text(tr!("timer.breathing_hint")).clicked() {
                 self.start_breathing();
             }
         }
@@ -383,7 +385,7 @@ impl TimeSnapperApp {
             let changed = ui
                 .add(
                     egui::TextEdit::singleline(&mut active.description)
-                        .hint_text("📝 Note til denne tidstagning…")
+                        .hint_text(tr!("timer.note_hint"))
                         .desired_width(f32::INFINITY),
                 )
                 .changed();
@@ -407,8 +409,8 @@ impl TimeSnapperApp {
             .horizontal(|ui| {
                 // Sortering skiftes direkte her (A–Å / senest brugt).
                 let (text, hover) = match self.data.settings.sort {
-                    SortOrder::Name => ("A–Å", "Sorteret efter navn. Klik for senest brugt først"),
-                    SortOrder::Recent => ("Senest", "Senest brugte først. Klik for at sortere efter navn"),
+                    SortOrder::Name => (tr!("list.sort_name"), tr!("list.sort_name_hint")),
+                    SortOrder::Recent => (tr!("list.sort_recent"), tr!("list.sort_recent_hint")),
                 };
                 let mut response = None;
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -424,7 +426,7 @@ impl TimeSnapperApp {
                     }
                     response = Some(ui.add(
                         egui::TextEdit::singleline(&mut self.search)
-                            .hint_text("🔍 Søg kunde eller projekt…")
+                            .hint_text(tr!("common.search_hint"))
                             .desired_width(ui.available_width()),
                     ));
                 });
@@ -438,7 +440,7 @@ impl TimeSnapperApp {
         ui.horizontal(|ui| {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut self.new_customer)
-                    .hint_text("Ny kunde…")
+                    .hint_text(tr!("list.new_customer"))
                     .desired_width(ui.available_width() - 30.0),
             );
             let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -487,13 +489,13 @@ impl TimeSnapperApp {
                                     start_project = Some(project.id);
                                 }
                                 response.context_menu(|ui| {
-                                    if ui.button("✏ Omdøb…").clicked() {
+                                    if ui.button(tr!("list.rename")).clicked() {
                                         rename = Some((Item::Project(project.id), project.name.clone()));
                                         ui.close();
                                     }
                                     let item = ui
-                                        .add_enabled(!self.data.is_internal(project.id), egui::Button::new("🗑 Slet projekt…"))
-                                        .on_disabled_hover_text("Intern tid kan ikke slettes");
+                                        .add_enabled(!self.data.is_internal(project.id), egui::Button::new(tr!("list.delete_project")))
+                                        .on_disabled_hover_text(tr!("list.internal_project_locked"));
                                     if item.clicked() {
                                         delete = Some(Item::Project(project.id));
                                         ui.close();
@@ -510,7 +512,7 @@ impl TimeSnapperApp {
                             let text = self.new_project.entry(customer.id).or_default();
                             let response = ui.add(
                                 egui::TextEdit::singleline(text)
-                                    .hint_text("Nyt projekt…")
+                                    .hint_text(tr!("list.new_project"))
                                     .desired_width(ui.available_width() - 30.0),
                             );
                             let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -521,32 +523,32 @@ impl TimeSnapperApp {
                         });
                     });
                 header.header_response.context_menu(|ui| {
-                    if ui.button("⊞ Udfold alle").clicked() {
+                    if ui.button(tr!("list.expand_all")).clicked() {
                         fold_all = Some(true);
                         ui.close();
                     }
-                    if ui.button("⊟ Sammenklap alle").clicked() {
+                    if ui.button(tr!("list.collapse_all")).clicked() {
                         fold_all = Some(false);
                         ui.close();
                     }
                     ui.separator();
                     let by_name = self.data.settings.sort == SortOrder::Name;
-                    if ui.add(egui::Button::selectable(by_name, "Sortér efter navn")).clicked() {
+                    if ui.add(egui::Button::selectable(by_name, tr!("list.menu_sort_name"))).clicked() {
                         sort = Some(SortOrder::Name);
                         ui.close();
                     }
-                    if ui.add(egui::Button::selectable(!by_name, "Sortér efter senest brugt")).clicked() {
+                    if ui.add(egui::Button::selectable(!by_name, tr!("list.menu_sort_recent"))).clicked() {
                         sort = Some(SortOrder::Recent);
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("✏ Omdøb…").clicked() {
+                    if ui.button(tr!("list.rename")).clicked() {
                         rename = Some((Item::Customer(customer.id), customer.name.clone()));
                         ui.close();
                     }
                     let item = ui
-                        .add_enabled(!internal_customer, egui::Button::new("🗑 Slet kunde…"))
-                        .on_disabled_hover_text("Den interne konto kan ikke slettes");
+                        .add_enabled(!internal_customer, egui::Button::new(tr!("list.delete_customer")))
+                        .on_disabled_hover_text(tr!("list.internal_customer_locked"));
                     if item.clicked() {
                         delete = Some(Item::Customer(customer.id));
                         ui.close();
@@ -555,7 +557,7 @@ impl TimeSnapperApp {
             }
 
             if searching && !any_match {
-                ui.label(RichText::new("Ingen kunder eller projekter matcher søgningen.").weak());
+                ui.label(RichText::new(tr!("list.no_match")).weak());
             }
         });
 
@@ -606,14 +608,14 @@ impl TimeSnapperApp {
         let small = ui.style().text_styles[&egui::TextStyle::Small].clone();
         let weak = ui.visuals().weak_text_color();
         let mut panel_texts = vec![
-            ("I dag".to_owned(), small.clone()),
+            (tr!("day.today"), small.clone()),
             (format_duration(day_total), egui::FontId::monospace(16.0)),
         ];
         if let Some(rounded) = rounded {
-            panel_texts.push((format!("afrundet {}", format_hours_minutes(rounded)), small.clone()));
+            panel_texts.push((tr!("day.rounded", time = format_hours_minutes(rounded)), small.clone()));
         }
         if let Some(total) = project_total {
-            panel_texts.push(("Projekt i alt".to_owned(), small.clone()));
+            panel_texts.push((tr!("day.project_total"), small.clone()));
             panel_texts.push((format_duration(total), egui::FontId::monospace(13.0)));
         }
         let text_width = panel_texts
@@ -641,11 +643,11 @@ impl TimeSnapperApp {
                     Some(id) => (self.data.project_label(id), Some(self.data.project_day_total(today, id))),
                     None => match self.target_label(&a.target) {
                         Some(target) => (format!("📞 {target}"), None),
-                        None => ("📞 Telefonopkald".to_owned(), None),
+                        None => (tr!("common.phone_call"), None),
                     },
                 };
                 let label = match (&a.note, a.project_id) {
-                    (Some(note), Some(_)) => format!("{label} ({note})"),
+                    (Some(note), Some(_)) => format!("{label} ({})", note_label(note)),
                     _ => label,
                 };
                 (a.elapsed(), label, today_on_project)
@@ -683,7 +685,7 @@ impl TimeSnapperApp {
             painter.text(
                 center + Vec2::new(0.0, 16.0),
                 egui::Align2::CENTER_CENTER,
-                format!("I dag {}", format_duration(today_on_project)),
+                tr!("day.today_time", time = format_duration(today_on_project)),
                 egui::FontId::monospace(12.0),
                 ui.visuals().weak_text_color(),
             );
@@ -702,16 +704,16 @@ impl TimeSnapperApp {
             panel.set_clip_rect(panel_rect.expand(2.0));
             let lines_height = 30.0 + if rounded.is_some() { 16.0 } else { 0.0 } + if project_total.is_some() { 42.0 } else { 0.0 };
             panel.add_space(((size - lines_height) / 2.0).max(0.0));
-            panel.label(RichText::new("I dag").weak().small());
+            panel.label(RichText::new(tr!("day.today")).weak().small());
             panel.label(RichText::new(format_duration(day_total)).monospace().size(16.0).strong());
             if let Some(rounded) = rounded {
                 panel
-                    .label(RichText::new(format!("afrundet {}", format_hours_minutes(rounded))).small().color(panel.visuals().warn_fg_color))
-                    .on_hover_text("Med de afrundinger du har lavet i Historik → Summeret");
+                    .label(RichText::new(tr!("day.rounded", time = format_hours_minutes(rounded))).small().color(panel.visuals().warn_fg_color))
+                    .on_hover_text(tr!("day.rounded_hint"));
             }
             if let Some(total) = project_total {
                 panel.add_space(8.0);
-                panel.label(RichText::new("Projekt i alt").weak().small());
+                panel.label(RichText::new(tr!("day.project_total")).weak().small());
                 panel.label(RichText::new(format_duration(total)).monospace().size(13.0));
             }
         }
@@ -721,7 +723,7 @@ impl TimeSnapperApp {
             Pos2::new(row.right() - button_width / 2.0, row.center().y),
             Vec2::new(button_width, 44.0),
         );
-        let (icon, hover) = if open { ("›", "Skjul dagens tid") } else { ("‹", "Vis dagens tid og projektets samlede tid") };
+        let (icon, hover) = if open { ("›", tr!("day.hide")) } else { ("‹", tr!("day.show")) };
         // I sit eget lille område (`put` ville flytte placeringen af det, der kommer under uret).
         let mut button_ui = ui.new_child(egui::UiBuilder::new().max_rect(button_rect));
         let button = egui::Button::new(RichText::new(icon).size(18.0)).min_size(button_rect.size());
@@ -740,7 +742,7 @@ impl TimeSnapperApp {
                 ui.add_space(((ui.available_width() - text_width - button_width) / 2.0).max(0.0));
                 ui.add(egui::Label::new(RichText::new(&label).strong()).truncate());
                 if can_move
-                    && move_button(ui).on_hover_text("Flyt den kørende tid til et andet projekt (uret fortsætter)").clicked()
+                    && move_button(ui).on_hover_text(tr!("timer.move_hint")).clicked()
                 {
                     self.picker = Some(ProjectPicker::moving());
                 }
@@ -757,7 +759,7 @@ impl TimeSnapperApp {
             if ui.button("▶").clicked() {
                 self.history_date += Duration::days(1);
             }
-            if ui.button("I dag").clicked() {
+            if ui.button(tr!("history.today")).clicked() {
                 self.history_date = Local::now().date_naive();
             }
         });
@@ -765,13 +767,13 @@ impl TimeSnapperApp {
 
         let entries = self.data.entries_on(self.history_date);
         let add_clicked = ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.history_view, HistoryView::Summary, "Summeret");
-            ui.selectable_value(&mut self.history_view, HistoryView::All, "Alle registreringer");
+            ui.selectable_value(&mut self.history_view, HistoryView::Summary, tr!("history.summary"));
+            ui.selectable_value(&mut self.history_view, HistoryView::All, tr!("history.all"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("📤").on_hover_text("Eksportér til Excel/CSV").clicked() {
+                if ui.button("📤").on_hover_text(tr!("history.export_hint")).clicked() {
                     self.export = Some(ExportDialog::new());
                 }
-                ui.button("➕").on_hover_text("Tilføj registrering").clicked()
+                ui.button("➕").on_hover_text(tr!("history.add_hint")).clicked()
             })
             .inner
         });
@@ -782,7 +784,7 @@ impl TimeSnapperApp {
         ui.add_space(4.0);
 
         if entries.is_empty() {
-            ui.label(RichText::new("Ingen registreringer denne dag.").weak());
+            ui.label(RichText::new(tr!("history.none")).weak());
             return;
         }
 
@@ -798,19 +800,19 @@ impl TimeSnapperApp {
                     HistoryView::Summary => {
                         ui.label("");
                         ui.label("");
-                        ui.label(RichText::new("Tid").weak().small());
-                        ui.label(RichText::new("Afrundet").weak().small())
-                            .on_hover_text("Rundet op til nærmeste påbegyndte kvarter");
+                        ui.label(RichText::new(tr!("history.col_time")).weak().small());
+                        ui.label(RichText::new(tr!("history.col_rounded")).weak().small())
+                            .on_hover_text(tr!("history.col_rounded_hint"));
                         ui.end_row();
                         for (project_id, d) in &totals {
                             let count = entries.iter().filter(|e| e.entry.project_id == *project_id).count();
                             let notes = day_notes(&entries, *project_id);
                             let response = ui.label(self.data.project_label(*project_id));
                             if !notes.is_empty() {
-                                response.on_hover_text(format!("Noter:\n• {}", notes.join("\n• ")));
+                                response.on_hover_text(format!("{}\n• {}", tr!("history.notes"), notes.join("\n• ")));
                             }
                             ui.label(RichText::new(format!("{count}×")).weak())
-                                .on_hover_text(format!("{count} registreringer"));
+                                .on_hover_text(tr!("history.entry_count", count = count));
                             ui.label(RichText::new(format_duration(*d)).monospace());
                             // Klik på den afrundede tid for at runde ned i stedet for op.
                             let r = self.data.rounded(date, *project_id, *d);
@@ -821,16 +823,16 @@ impl TimeSnapperApp {
                                     .color(ui.visuals().warn_fg_color);
                             }
                             let hover = match (r.can_toggle, r.down) {
-                                (false, _) => "Præcis på et kvarter".to_owned(),
-                                (true, false) => format!(
-                                    "Rundet op fra {}. Klik for at runde ned til {}",
-                                    format_duration(*d),
-                                    format_hours_minutes(round_down_quarter(*d))
+                                (false, _) => tr!("history.exact_quarter"),
+                                (true, false) => tr!(
+                                    "history.rounded_up_hint",
+                                    from = format_duration(*d),
+                                    to = format_hours_minutes(round_down_quarter(*d))
                                 ),
-                                (true, true) => format!(
-                                    "Rundet ned manuelt fra {}. Klik for at runde op til {}",
-                                    format_duration(*d),
-                                    format_hours_minutes(round_up_quarter(*d))
+                                (true, true) => tr!(
+                                    "history.rounded_down_hint",
+                                    from = format_duration(*d),
+                                    to = format_hours_minutes(round_up_quarter(*d))
                                 ),
                             };
                             if r.can_toggle {
@@ -849,21 +851,21 @@ impl TimeSnapperApp {
                             let e = &day_entry.entry;
                             let mut label = self.data.project_label(e.project_id);
                             if let Some(note) = &e.note {
-                                label = format!("{label} ({note})");
+                                label = format!("{label} ({})", note_label(note));
                             }
                             ui.vertical(|ui| {
                                 match day_entry.index {
                                     Some(index) => {
-                                        let response = ui.selectable_label(false, label).on_hover_text("Klik for at rette");
+                                        let response = ui.selectable_label(false, label).on_hover_text(tr!("history.click_to_edit"));
                                         if response.clicked() {
                                             open_editor = Some(EntryEditor::edit(index, e));
                                         }
                                         response.context_menu(|ui| {
-                                            if ui.button("✏ Ret…").clicked() {
+                                            if ui.button(tr!("history.edit")).clicked() {
                                                 open_editor = Some(EntryEditor::edit(index, e));
                                                 ui.close();
                                             }
-                                            if ui.button("🗑 Slet…").clicked() {
+                                            if ui.button(tr!("history.delete")).clicked() {
                                                 open_editor = Some(EntryEditor::delete(index, e));
                                                 ui.close();
                                             }
@@ -872,7 +874,7 @@ impl TimeSnapperApp {
                                     // Den kørende timer kan ikke rettes, før den er stoppet.
                                     None => {
                                         ui.label(RichText::new(format!("▶ {label}")).color(ACCENT))
-                                            .on_hover_text("Kører stadig. Stop timeren for at rette den.");
+                                            .on_hover_text(tr!("history.running"));
                                     }
                                 }
                                 if !e.description.is_empty() {
@@ -890,7 +892,7 @@ impl TimeSnapperApp {
                         }
                     }
                 }
-                ui.label(RichText::new("I alt").strong());
+                ui.label(RichText::new(tr!("history.total")).strong());
                 ui.label("");
                 ui.label(RichText::new(format_duration(day_total)).monospace().strong());
                 if self.history_view == HistoryView::Summary {
@@ -899,7 +901,7 @@ impl TimeSnapperApp {
                         .iter()
                         .fold(Duration::zero(), |sum, (id, d)| sum + self.data.rounded(date, *id, *d).time);
                     ui.label(RichText::new(format_hours_minutes(rounded)).monospace().strong())
-                        .on_hover_text("Summen af de afrundede tider pr. projekt");
+                        .on_hover_text(tr!("history.rounded_total_hint"));
                 }
                 ui.end_row();
             });
@@ -933,6 +935,7 @@ impl eframe::App for TimeSnapperApp {
     /// timeren, systembakken og "væk"-registreringen virker uden vinduet.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_tray_actions(ctx);
+        self.handle_second_start(ctx);
         let global_actions = self.hotkeys.as_ref().map(|h| h.poll()).unwrap_or_default();
         for action in global_actions {
             self.run_action(ctx, action, true);
@@ -1082,21 +1085,21 @@ impl TimeSnapperApp {
     fn full_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.toggle_value(&mut self.settings_open, "☰").on_hover_text("Indstillinger");
-                ui.selectable_value(&mut self.tab, Tab::Timer, "⏱ Timer");
+                ui.toggle_value(&mut self.settings_open, "☰").on_hover_text(tr!("settings.title"));
+                ui.selectable_value(&mut self.tab, Tab::Timer, tr!("tabs.timer"));
                 // Historikken åbner altid i den summerede visning.
-                if ui.selectable_value(&mut self.tab, Tab::History, "📅 Historik").changed() {
+                if ui.selectable_value(&mut self.tab, Tab::History, tr!("tabs.history")).changed() {
                     self.history_view = HistoryView::Summary;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let fold_hint = self.shortcut_hint(Action::Fold);
-                    if ui.button("🗕").on_hover_text(format!("Fold sammen til en lille bjælke{fold_hint}")).clicked() {
+                    if ui.button("🗕").on_hover_text(format!("{}{fold_hint}", tr!("tabs.fold_hint"))).clicked() {
                         self.data.compact = true;
                         self.save();
                     }
                     if ui
                         .toggle_value(&mut self.always_on_top, "📌")
-                        .on_hover_text("Hold vinduet øverst")
+                        .on_hover_text(tr!("tabs.on_top_hint"))
                         .changed()
                     {
                         self.apply_window_level(ctx);
@@ -1160,7 +1163,7 @@ impl TimeSnapperApp {
 
         let modal = egui::Modal::new(egui::Id::unique("call_dialog")).show(ctx, |ui| {
             ui.set_width(270.0);
-            ui.heading("📞 Telefonopkald");
+            ui.heading(tr!("common.phone_call"));
             ui.label(format!(
                 "{}  {}–{}  ({})",
                 call.start.format("%d-%m"),
@@ -1169,9 +1172,9 @@ impl TimeSnapperApp {
                 format_duration(call.duration()),
             ));
             if self.data.unassigned.len() > 1 {
-                ui.label(RichText::new(format!("{} opkald mere venter", self.data.unassigned.len() - 1)).weak());
+                ui.label(RichText::new(tr!("call.more_waiting", count = self.data.unassigned.len() - 1)).weak());
             }
-            ui.label("Hvor skal tiden registreres?");
+            ui.label(tr!("call.where"));
             ui.separator();
 
             let full = Vec2::new(ui.available_width(), 24.0);
@@ -1209,21 +1212,21 @@ impl TimeSnapperApp {
             });
 
             ui.separator();
-            ui.label(RichText::new("Eller skriv kunde og projekt (oprettes hvis de ikke findes):").weak());
+            ui.label(RichText::new(tr!("call.or_type")).weak());
             typed_target_fields(ui, &mut target);
             ui.add_space(4.0);
 
             let complete = self.data.target_is_complete(&target);
             ui.horizontal(|ui| {
                 confirm |= ui
-                    .add_enabled(complete, egui::Button::new("✔ Registrér"))
+                    .add_enabled(complete, egui::Button::new(tr!("call.register")))
                     .on_hover_text("Enter")
                     .clicked();
-                if ui.button("Senere").on_hover_text("Esc").clicked() {
+                if ui.button(tr!("call.later")).on_hover_text("Esc").clicked() {
                     ui.close();
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("🗑 Kassér").on_hover_text("Opkaldet registreres ikke").clicked() {
+                    if ui.button(tr!("call.discard")).on_hover_text(tr!("call.discard_hint")).clicked() {
                         discard = true;
                     }
                 });
@@ -1260,10 +1263,10 @@ impl TimeSnapperApp {
         let Some(Rename { item, name, error, focused }) = self.rename.as_mut() else { return };
         let item = *item;
         let title = match item {
-            Item::Customer(_) => "✏ Omdøb kunde".to_owned(),
+            Item::Customer(_) => tr!("rename.customer_title"),
             Item::Project(id) => {
                 let customer = self.data.project(id).and_then(|p| self.data.customer(p.customer_id));
-                format!("✏ Omdøb projekt hos {}", customer.map_or("?", |c| c.name.as_str()))
+                tr!("rename.project_title", customer = customer.map_or("?", |c| c.name.as_str()))
             }
         };
         let mut save = false;
@@ -1287,8 +1290,8 @@ impl TimeSnapperApp {
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                save |= ui.button("✔ Gem").on_hover_text("Enter").clicked();
-                cancel |= ui.button("Annuller").on_hover_text("Esc").clicked();
+                save |= ui.button(tr!("common.save")).on_hover_text("Enter").clicked();
+                cancel |= ui.button(tr!("common.cancel")).on_hover_text("Esc").clicked();
             });
             save |= ui.input(|i| i.key_pressed(egui::Key::Enter));
         });
@@ -1318,16 +1321,13 @@ impl TimeSnapperApp {
                 let name = self.data.customer(id).map_or_else(String::new, |c| c.name.clone());
                 let projects = self.data.visible_projects().filter(|p| p.customer_id == id).count();
                 let (count, total) = self.data.customer_stats(id);
-                let details = format!(
-                    "Kundens {projects} projekt(er) slettes også. {count} registrering(er) ({}) bevares i historikken.",
-                    format_duration(total)
-                );
-                ("Slet kunde", name, details)
+                let details = tr!("delete.customer_details", projects = projects, count = count, total = format_duration(total));
+                (tr!("delete.customer_title"), name, details)
             }
             Item::Project(id) => {
                 let (count, total) = self.data.project_stats(id);
-                let details = format!("{count} registrering(er) ({}) bevares i historikken.", format_duration(total));
-                ("Slet projekt", self.data.project_label(id), details)
+                let details = tr!("delete.project_details", count = count, total = format_duration(total));
+                (tr!("delete.project_title"), self.data.project_label(id), details)
             }
         };
         let affects_timer = self.data.active.as_ref().and_then(|a| a.project_id).is_some_and(|id| match target {
@@ -1339,20 +1339,20 @@ impl TimeSnapperApp {
         let modal = egui::Modal::new(egui::Id::unique("delete_dialog")).show(ctx, |ui| {
             ui.set_width(260.0);
             ui.heading(format!("🗑 {title}"));
-            ui.label(format!("Er du sikker på, at du vil slette \"{name}\"?"));
+            ui.label(tr!("delete.confirm", name = name));
             ui.add_space(4.0);
             ui.label(RichText::new(details).weak());
             if affects_timer {
-                ui.label(RichText::new("Timeren kører på dette projekt og bliver stoppet.").color(ui.visuals().warn_fg_color));
+                ui.label(RichText::new(tr!("delete.timer_running")).color(ui.visuals().warn_fg_color));
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let delete = egui::Button::new(RichText::new("🗑 Slet").color(Color32::WHITE))
+                let delete = egui::Button::new(RichText::new(tr!("common.delete")).color(Color32::WHITE))
                     .fill(Color32::from_rgb(200, 60, 60));
                 if ui.add(delete).clicked() {
                     confirmed = true;
                 }
-                if ui.button("Annuller").on_hover_text("Esc").clicked() {
+                if ui.button(tr!("common.cancel")).on_hover_text("Esc").clicked() {
                     ui.close();
                 }
             });
@@ -1375,10 +1375,10 @@ impl TimeSnapperApp {
         let Some(active) = &self.data.active else { return };
         let mut target = active.target.clone();
 
-        ui.label(RichText::new("Registrér opkaldet på:").weak());
+        ui.label(RichText::new(tr!("call.register_on")).weak());
         let selected = match target.project_id {
             Some(id) => self.data.project_label(id),
-            None => "Vælg eksisterende projekt…".to_owned(),
+            None => tr!("call.choose_existing"),
         };
         egui::ComboBox::from_id_salt("call_target")
             .width(ui.available_width() - 8.0)
@@ -1483,6 +1483,22 @@ impl TimeSnapperApp {
         self.data.settings.shortcuts.local(action).map_or_else(String::new, |c| format!(" ({c})"))
     }
 
+    pub fn with_instance(mut self, instance: crate::single_instance::Instance) -> Self {
+        self.instance = Some(instance);
+        self
+    }
+
+    /// Programmet blev startet igen: vis det kørende vindue i stedet.
+    fn handle_second_start(&mut self, ctx: &egui::Context) {
+        let Some(instance) = &self.instance else { return };
+        instance.set_context(ctx);
+        let show = instance.poll().into_iter().any(|c| matches!(c, crate::single_instance::Command::Show));
+        if show {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            self.show_window(ctx);
+        }
+    }
+
     fn show_window(&mut self, ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -1542,14 +1558,14 @@ impl TimeSnapperApp {
         let active = self.data.active.as_ref();
         let active_project = active.and_then(|a| a.project_id);
         let status = match active {
-            None => "Ingen tid kører".to_owned(),
+            None => tr!("common.no_timer"),
             Some(a) => {
                 let what = match a.project_id {
                     Some(id) => self.data.project_label(id),
-                    None => "📞 Telefonopkald".to_owned(),
+                    None => tr!("common.phone_call"),
                 };
                 let what = match &a.note {
-                    Some(note) if a.project_id.is_some() => format!("{what} ({note})"),
+                    Some(note) if a.project_id.is_some() => format!("{what} ({})", note_label(note)),
                     _ => what,
                 };
                 format!("▶ {what} · {}", format_duration(a.elapsed()))
@@ -1559,14 +1575,14 @@ impl TimeSnapperApp {
         let on_call = active.is_some_and(|a| a.is_call());
         let resume = self.data.resume_project().map(|id| self.data.project_label(id));
         let pause_label = match (on_pause, &resume) {
-            (false, _) => "☕ Pause".to_owned(),
-            (true, Some(label)) => format!("▶ Fortsæt på {label}"),
-            (true, None) => "☕ Afslut pause".to_owned(),
+            (false, _) => tr!("timer.break"),
+            (true, Some(label)) => tr!("tray.resume_on", project = label),
+            (true, None) => tr!("timer.end_break"),
         };
         let call_label = match (on_call, &resume) {
-            (false, _) => "📞 Telefon".to_owned(),
-            (true, Some(label)) => format!("📞 Afslut opkald og fortsæt på {label}"),
-            (true, None) => "📞 Afslut opkald".to_owned(),
+            (false, _) => tr!("timer.phone"),
+            (true, Some(label)) => tr!("tray.end_call_resume", project = label),
+            (true, None) => tr!("tray.end_call"),
         };
         let customers = self
             .data
@@ -1588,6 +1604,7 @@ impl TimeSnapperApp {
             call_label,
             pause_label,
             window_visible: self.window_visible,
+            language: rust_i18n::locale().to_string(),
             customers,
         };
         if let Some(tray) = &mut self.tray {
@@ -1597,14 +1614,32 @@ impl TimeSnapperApp {
 
     fn settings_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.add_space(6.0);
-        ui.heading("Indstillinger");
+        ui.heading(tr!("settings.title"));
         ui.add_space(10.0);
 
-        ui.label(RichText::new("Tema").strong());
+        ui.label(RichText::new(tr!("settings.language")).strong());
+        let mut language = self.data.settings.language;
+        egui::ComboBox::from_id_salt("language")
+            .width(ui.available_width() - 8.0)
+            .selected_text(language.label())
+            .show_ui(ui, |ui| {
+                for option in crate::i18n::Language::ALL {
+                    ui.selectable_value(&mut language, option, option.label());
+                }
+            });
+        if language != self.data.settings.language {
+            self.data.settings.language = language;
+            crate::i18n::apply(language);
+            self.data.localize_internal_names();
+            self.save();
+        }
+        ui.add_space(14.0);
+
+        ui.label(RichText::new(tr!("settings.theme")).strong());
         let mut theme = self.data.theme;
-        ui.radio_value(&mut theme, ThemeChoice::System, "💻 Følg systemet");
-        ui.radio_value(&mut theme, ThemeChoice::Light, "☀ Lyst");
-        ui.radio_value(&mut theme, ThemeChoice::Dark, "🌙 Mørkt");
+        ui.radio_value(&mut theme, ThemeChoice::System, tr!("settings.theme_system"));
+        ui.radio_value(&mut theme, ThemeChoice::Light, tr!("settings.theme_light"));
+        ui.radio_value(&mut theme, ThemeChoice::Dark, tr!("settings.theme_dark"));
         if theme != self.data.theme {
             self.data.theme = theme;
             ctx.set_theme(theme.to_egui());
@@ -1612,9 +1647,9 @@ impl TimeSnapperApp {
         }
         ui.add_space(14.0);
 
-        ui.label(RichText::new("Start").strong());
+        ui.label(RichText::new(tr!("settings.start")).strong());
         let mut autostart = self.autostart;
-        if ui.checkbox(&mut autostart, "Start Time Snapper, når jeg logger på").changed() {
+        if ui.checkbox(&mut autostart, tr!("settings.autostart")).changed() {
             if let Err(e) = crate::autostart::set_enabled(autostart) {
                 self.error = Some(e);
             }
@@ -1622,9 +1657,9 @@ impl TimeSnapperApp {
         }
         ui.add_space(14.0);
 
-        ui.label(RichText::new("Nye kunder").strong());
+        ui.label(RichText::new(tr!("settings.new_customers")).strong());
         ui.label(
-            RichText::new("Projekter som alle nye kunder får. Med Auto start starter tiden på projektet, når kunden oprettes.")
+            RichText::new(tr!("settings.new_customers_hint"))
                 .weak()
                 .small(),
         );
@@ -1639,8 +1674,8 @@ impl TimeSnapperApp {
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| ui.add(egui::Label::new(&project.name).truncate()),
                 );
-                ui.checkbox(&mut project.auto_start, "Auto start");
-                if ui.small_button("×").on_hover_text("Fjern fra skabelonen").clicked() {
+                ui.checkbox(&mut project.auto_start, tr!("settings.auto_start"));
+                if ui.small_button("×").on_hover_text(tr!("settings.remove_template")).clicked() {
                     remove = Some(i);
                 }
             });
@@ -1659,7 +1694,7 @@ impl TimeSnapperApp {
         ui.horizontal(|ui| {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut self.new_template_project)
-                    .hint_text("Nyt projekt…")
+                    .hint_text(tr!("list.new_project"))
                     .desired_width(ui.available_width() - 30.0),
             );
             let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -1675,17 +1710,17 @@ impl TimeSnapperApp {
         }
         ui.add_space(14.0);
 
-        ui.label(RichText::new("Pausepåmindelse").strong());
+        ui.label(RichText::new(tr!("settings.break_reminder")).strong());
         let mut settings = self.data.settings.clone();
-        ui.checkbox(&mut settings.break_reminder, "Mind mig om at holde en kort pause");
+        ui.checkbox(&mut settings.break_reminder, tr!("settings.break_reminder_check"));
         ui.add_enabled_ui(settings.break_reminder, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Efter");
+                ui.label(tr!("settings.after"));
                 ui.add(egui::Slider::new(&mut settings.break_minutes, 15..=180).step_by(5.0).suffix(" min"));
             });
         });
         ui.label(
-            RichText::new("Arbejdstid tælles fra sidste pause, eller fra du har været væk eller haft tiden stoppet i mindst 5 min.")
+            RichText::new(tr!("settings.break_reminder_hint"))
                 .weak()
                 .small(),
         );
@@ -1695,7 +1730,7 @@ impl TimeSnapperApp {
         }
         ui.add_space(14.0);
 
-        ui.label(RichText::new("Åndedrætsøvelse").strong());
+        ui.label(RichText::new(tr!("breathing.window_title")).strong());
         let mut settings = self.data.settings.clone();
         egui::ComboBox::from_id_salt("breathing_exercise")
             .width(ui.available_width() - 8.0)
@@ -1706,12 +1741,12 @@ impl TimeSnapperApp {
                 }
             });
         ui.horizontal(|ui| {
-            ui.label("Længde");
+            ui.label(tr!("settings.length"));
             ui.radio_value(&mut settings.breathing_minutes, 1, "1 min");
             ui.radio_value(&mut settings.breathing_minutes, 2, "2 min");
         });
-        ui.checkbox(&mut settings.breathing_auto, "Start øvelsen, når jeg holder pause");
-        if ui.add_enabled(self.breathing.is_none(), egui::Button::new("💨 Prøv nu")).clicked() {
+        ui.checkbox(&mut settings.breathing_auto, tr!("settings.breathing_auto"));
+        if ui.add_enabled(self.breathing.is_none(), egui::Button::new(tr!("settings.try_now"))).clicked() {
             self.start_breathing();
         }
         if settings != self.data.settings {
@@ -1720,32 +1755,32 @@ impl TimeSnapperApp {
         }
         ui.add_space(14.0);
 
-        ui.label(RichText::new("Væk fra computeren").strong());
+        ui.label(RichText::new(tr!("settings.away")).strong());
         let mut settings = self.data.settings.clone();
-        ui.checkbox(&mut settings.away_enabled, "Spørg om tiden skal være pause, når jeg har været væk");
+        ui.checkbox(&mut settings.away_enabled, tr!("settings.away_check"));
         ui.add_enabled_ui(settings.away_enabled, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Efter");
+                ui.label(tr!("settings.after"));
                 ui.add(egui::Slider::new(&mut settings.away_minutes, 5..=60).step_by(5.0).suffix(" min"));
             });
         });
         ui.label(
-            RichText::new("Gælder når der kører tid på et projekt, og man ikke har rørt mus eller tastatur.")
+            RichText::new(tr!("settings.away_hint"))
                 .weak()
                 .small(),
         );
         ui.add_space(14.0);
-        ui.label(RichText::new("Genvejstaster").strong());
-        if ui.button("⌨ Genvejstaster…").clicked() {
+        ui.label(RichText::new(tr!("settings.shortcuts")).strong());
+        if ui.button(tr!("settings.shortcuts_button")).clicked() {
             self.shortcuts_dialog = Some(ShortcutsDialog::default());
         }
 
         if self.tray.is_some() {
             ui.add_space(14.0);
-            ui.label(RichText::new("Systembakke").strong());
-            ui.checkbox(&mut settings.close_to_tray, "Luk til systembakken (tiden kører videre)");
+            ui.label(RichText::new(tr!("settings.tray")).strong());
+            ui.checkbox(&mut settings.close_to_tray, tr!("settings.close_to_tray"));
             ui.label(
-                RichText::new("Afslut helt via ikonet i systembakken. Venstreklik på ikonet viser vinduet.")
+                RichText::new(tr!("settings.tray_hint"))
                     .weak()
                     .small(),
             );
@@ -1826,7 +1861,7 @@ impl TimeSnapperApp {
             None => return,
         };
         let label = match &prompt.snapshot.note {
-            Some(note) => format!("{label} ({note})"),
+            Some(note) => format!("{label} ({})", note_label(note)),
             None => label,
         };
         let (from, to) = (prompt.from, prompt.to);
@@ -1834,18 +1869,18 @@ impl TimeSnapperApp {
 
         let modal = egui::Modal::new(egui::Id::unique("sleep_dialog")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(240.0, 300.0));
-            ui.heading("🌙 Computeren har sovet");
+            ui.heading(tr!("sleep.title"));
             ui.add_space(4.0);
-            ui.label(format!("Fra {} til {}.", from.format("%H:%M"), to.format("%H:%M")));
-            ui.label(format!("Tiden blev stoppet kl. {}.", from.format("%H:%M")));
+            ui.label(tr!("sleep.period", from = from.format("%H:%M"), to = to.format("%H:%M")));
+            ui.label(tr!("sleep.stopped", time = from.format("%H:%M")));
             ui.add_space(4.0);
-            ui.label(RichText::new(format!("Fortsæt på {label}?")).strong());
+            ui.label(RichText::new(tr!("sleep.resume_question", project = label)).strong());
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("▶ Fortsæt").on_hover_text("Enter").clicked() {
+                if ui.button(tr!("timer.resume")).on_hover_text("Enter").clicked() {
                     answer = Some(true);
                 }
-                if ui.button("Nej tak").on_hover_text("Esc").clicked() {
+                if ui.button(tr!("sleep.no_thanks")).on_hover_text("Esc").clicked() {
                     answer = Some(false);
                 }
             });
@@ -1869,32 +1904,23 @@ impl TimeSnapperApp {
     fn away_dialog(&mut self, ctx: &egui::Context) {
         let Some(prompt) = &self.away_prompt else { return };
         let (project_id, from, to) = (prompt.project_id, prompt.from, prompt.to);
-        let minutes = (to - from).num_minutes();
-        let length = if minutes < 60 {
-            format!("{minutes} min")
-        } else {
-            format!("{} t {:02} min", minutes / 60, minutes % 60)
-        };
+        let length = format_length(to - from);
         let mut answer = None;
 
         let modal = egui::Modal::new(egui::Id::unique("away_dialog")).show(ctx, |ui| {
             ui.set_width(270.0);
-            ui.heading("👋 Velkommen tilbage");
+            ui.heading(tr!("away.title"));
             ui.add_space(4.0);
-            ui.label(format!(
-                "Du har været væk fra computeren fra {} til {} ({length}).",
-                from.format("%H:%M"),
-                to.format("%H:%M")
-            ));
-            ui.label(format!("Imens kørte tiden på {}.", self.data.project_label(project_id)));
+            ui.label(tr!("away.period", from = from.format("%H:%M"), to = to.format("%H:%M"), length = length));
+            ui.label(tr!("away.meanwhile", project = self.data.project_label(project_id)));
             ui.add_space(4.0);
-            ui.label(RichText::new("Skal tiden registreres som pause?").strong());
+            ui.label(RichText::new(tr!("away.question")).strong());
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("☕ Ja, som pause").on_hover_text("Enter").clicked() {
+                if ui.button(tr!("away.yes")).on_hover_text("Enter").clicked() {
                     answer = Some(true);
                 }
-                if ui.button("Nej, behold på projektet").on_hover_text("Esc").clicked() {
+                if ui.button(tr!("away.no")).on_hover_text("Esc").clicked() {
                     answer = Some(false);
                 }
             });
@@ -1923,10 +1949,10 @@ fn typed_target_fields(ui: &mut egui::Ui, target: &mut CallTarget) {
     ui.horizontal(|ui| {
         let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0 - 4.0;
         changed |= ui
-            .add(egui::TextEdit::singleline(&mut target.customer).hint_text("Kunde").desired_width(width))
+            .add(egui::TextEdit::singleline(&mut target.customer).hint_text(tr!("common.customer")).desired_width(width))
             .changed();
         changed |= ui
-            .add(egui::TextEdit::singleline(&mut target.project).hint_text("Projekt").desired_width(width))
+            .add(egui::TextEdit::singleline(&mut target.project).hint_text(tr!("common.project")).desired_width(width))
             .changed();
     });
     if changed {
@@ -1938,7 +1964,7 @@ fn search_field(ui: &mut egui::Ui, query: &mut String) -> egui::Response {
     ui.horizontal(|ui| {
         let response = ui.add(
             egui::TextEdit::singleline(query)
-                .hint_text("🔍 Søg kunde eller projekt…")
+                .hint_text(tr!("common.search_hint"))
                 .desired_width(ui.available_width() - 30.0),
         );
         if ui.add_enabled(!query.is_empty(), egui::Button::new("×")).clicked() {

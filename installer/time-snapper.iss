@@ -32,16 +32,26 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Luk et kørende Time Snapper ved opdatering.
 CloseApplications=yes
+; Vælg sprog efter Windows uden at spørge (spørg kun, hvis intet passer).
+ShowLanguageDialog=auto
 ; Valgene fra sidste installation (f.eks. skrivebordsikon) huskes ved opdatering.
 ; Automatisk start vises kun ved første installation (se IsUpgrade): derefter
 ; styres den inde i programmet, og en opdatering må hverken slå den til eller fra.
 
+; Installeren vælger selv sprog efter Windows (dansk ellers engelsk).
 [Languages]
 Name: "danish"; MessagesFile: "compiler:Languages\Danish.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[CustomMessages]
+danish.AutoStart=Start Time Snapper, når jeg logger på Windows
+english.AutoStart=Start Time Snapper when I sign in to Windows
+danish.Other=Andet:
+english.Other=Other:
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Start Time Snapper, når jeg logger på Windows"; GroupDescription: "Andet:"; Flags: unchecked; Check: not IsUpgrade
+Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: "{cm:Other}"; Flags: unchecked; Check: not IsUpgrade
 
 [Files]
 Source: "..\target\release\time_snapper.exe"; DestDir: "{app}"; DestName: "TimeSnapper.exe"; Flags: ignoreversion

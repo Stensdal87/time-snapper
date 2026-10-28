@@ -40,6 +40,8 @@ pub struct TrayState {
     /// Teksten på pause-punktet ("☕ Pause", "▶ Fortsæt" …).
     pub pause_label: String,
     pub window_visible: bool,
+    /// Sproget, så menuen bygges om, når det skiftes.
+    pub language: String,
     /// Kunder med deres projekter.
     pub customers: Vec<(String, Vec<TrayProject>)>,
 }
@@ -180,17 +182,17 @@ mod platform {
             vec![
                 item(s.status.clone(), false, |_| {}),
                 MenuItem::Separator,
-                SubMenu { label: "Skift projekt".into(), submenu: projects, ..Default::default() }.into(),
+                SubMenu { label: tr!("tray.switch_project"), submenu: projects, ..Default::default() }.into(),
                 item(s.call_label.clone(), true, |t| t.sender.send(TrayAction::Call)),
                 item(s.pause_label.clone(), true, |t| t.sender.send(TrayAction::Pause)),
-                item("⏹ Stop", s.running, |t| t.sender.send(TrayAction::Stop)),
+                item(tr!("tray.stop"), s.running, |t| t.sender.send(TrayAction::Stop)),
                 MenuItem::Separator,
                 item(
-                    if s.window_visible { "Skjul vinduet" } else { "Vis vinduet" },
+                    if s.window_visible { tr!("tray.hide_window") } else { tr!("tray.show_window") },
                     true,
                     |t| t.sender.send(TrayAction::Toggle),
                 ),
-                item("Afslut Time Snapper", true, |t| t.sender.send(TrayAction::Quit)),
+                item(tr!("tray.quit"), true, |t| t.sender.send(TrayAction::Quit)),
             ]
         }
     }
@@ -265,7 +267,7 @@ mod platform {
 
     fn build_menu(s: &TrayState) -> (Menu, MenuItem) {
         let menu = Menu::new();
-        let switch = Submenu::new("Skift projekt", true);
+        let switch = Submenu::new(tr!("tray.switch_project"), true);
         for (customer, projects) in &s.customers {
             let sub = Submenu::new(customer, true);
             for p in projects {
@@ -274,17 +276,17 @@ mod platform {
             }
             let _ = switch.append(&sub);
         }
-        let toggle = if s.window_visible { "Skjul vinduet" } else { "Vis vinduet" };
+        let toggle = if s.window_visible { tr!("tray.hide_window") } else { tr!("tray.show_window") };
         let status_item = MenuItem::with_id("status", &s.status, false, None);
         let _ = menu.append(&status_item);
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&switch);
         let _ = menu.append(&MenuItem::with_id("call", &s.call_label, true, None));
         let _ = menu.append(&MenuItem::with_id("pause", &s.pause_label, true, None));
-        let _ = menu.append(&MenuItem::with_id("stop", "⏹ Stop", s.running, None));
+        let _ = menu.append(&MenuItem::with_id("stop", tr!("tray.stop"), s.running, None));
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&MenuItem::with_id("toggle", toggle, true, None));
-        let _ = menu.append(&MenuItem::with_id("quit", "Afslut Time Snapper", true, None));
+        let _ = menu.append(&MenuItem::with_id("quit", tr!("tray.quit"), true, None));
         (menu, status_item)
     }
 }

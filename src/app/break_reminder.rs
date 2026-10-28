@@ -10,16 +10,21 @@ const MIN_BREAK: Duration = Duration::minutes(5);
 /// "Om 10 min".
 const SNOOZE: Duration = Duration::minutes(10);
 
-const TIPS: [&str; 8] = [
-    "Rejs dig og stræk benene et par minutter.",
-    "Kig ud ad vinduet og fokusér på noget langt væk i 20 sekunder.",
-    "Hent et glas vand.",
-    "Rul skuldrene og stræk nakken.",
-    "Gå en lille tur, også selvom det bare er til kaffemaskinen.",
-    "Luk øjnene og tag et par dybe vejrtrækninger.",
-    "Stræk armene over hovedet og ræk op mod loftet.",
-    "Ryst hænderne og stræk fingrene, de har arbejdet hårdt.",
-];
+const TIP_COUNT: usize = 8;
+
+/// Tippet i pausepåmindelsen; de skifter fra gang til gang.
+fn tip(index: usize) -> String {
+    match index % TIP_COUNT {
+        0 => tr!("break.tip_legs"),
+        1 => tr!("break.tip_window"),
+        2 => tr!("break.tip_water"),
+        3 => tr!("break.tip_shoulders"),
+        4 => tr!("break.tip_walk"),
+        5 => tr!("break.tip_eyes"),
+        6 => tr!("break.tip_arms"),
+        _ => tr!("break.tip_hands"),
+    }
+}
 
 pub(super) struct BreakReminder {
     /// Hvornår den seneste pause sluttede (eller programmet startede).
@@ -84,7 +89,7 @@ impl BreakReminder {
             return false;
         }
         self.prompt = Some(worked);
-        self.tip = (self.tip + 1) % TIPS.len();
+        self.tip = (self.tip + 1) % TIP_COUNT;
         true
     }
 }
@@ -115,13 +120,8 @@ impl TimeSnapperApp {
     /// "Tid til en lille pause?" Enter holder pause, Esc minder igen om 10 min.
     pub(super) fn break_dialog(&mut self, ctx: &egui::Context) {
         let Some(worked) = self.break_reminder.prompt else { return };
-        let minutes = worked.num_minutes();
-        let worked_text = if minutes < 60 {
-            format!("{minutes} min")
-        } else {
-            format!("{} t {:02} min", minutes / 60, minutes % 60)
-        };
-        let tip = TIPS[self.break_reminder.tip];
+        let worked_text = format_length(worked);
+        let tip = tip(self.break_reminder.tip);
         enum Answer {
             Pause,
             PauseBreathing,
@@ -132,23 +132,23 @@ impl TimeSnapperApp {
 
         let modal = egui::Modal::new(egui::Id::unique("break_dialog")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(240.0, 300.0));
-            ui.heading("☕ Tid til en lille pause?");
+            ui.heading(tr!("break.title"));
             ui.add_space(4.0);
-            ui.label(format!("Du har arbejdet i {worked_text} siden sidste pause."));
+            ui.label(tr!("break.worked", length = worked_text));
             ui.add_space(4.0);
-            ui.label(RichText::new(format!("Tip: {tip}")).italics().weak());
+            ui.label(RichText::new(tr!("break.tip", tip = tip)).italics().weak());
             ui.add_space(10.0);
             ui.horizontal_wrapped(|ui| {
-                if ui.button("☕ Hold pause nu").on_hover_text("Enter").clicked() {
+                if ui.button(tr!("break.take_break")).on_hover_text("Enter").clicked() {
                     answer = Some(Answer::Pause);
                 }
-                if ui.button("💨 Pause med øvelse").on_hover_text("Hold pause og lav en kort åndedrætsøvelse").clicked() {
+                if ui.button(tr!("break.with_exercise")).on_hover_text(tr!("break.with_exercise_hint")).clicked() {
                     answer = Some(Answer::PauseBreathing);
                 }
-                if ui.button("Om 10 min").on_hover_text("Esc").clicked() {
+                if ui.button(tr!("break.snooze")).on_hover_text("Esc").clicked() {
                     answer = Some(Answer::Snooze);
                 }
-                if ui.button("Spring over").on_hover_text("Tæl forfra fra nu").clicked() {
+                if ui.button(tr!("break.skip")).on_hover_text(tr!("break.skip_hint")).clicked() {
                     answer = Some(Answer::Skip);
                 }
             });

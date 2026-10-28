@@ -129,7 +129,7 @@ mod platform {
                     let bindings = thread_pending.lock().map(|b| b.clone()).unwrap_or_default();
                     for (action, combo) in bindings {
                         let Some(vk) = virtual_key(combo.key) else {
-                            new_errors.insert(action, "Tasten kan ikke bruges globalt".to_owned());
+                            new_errors.insert(action, tr!("hotkey.unsupported_key"));
                             continue;
                         };
                         let mut mods = MOD_NOREPEAT;
@@ -147,7 +147,7 @@ mod platform {
                         if unsafe { RegisterHotKey(std::ptr::null_mut(), id, mods, vk) } != 0 {
                             registered.push(action);
                         } else {
-                            new_errors.insert(action, "Optaget af et andet program".to_owned());
+                            new_errors.insert(action, tr!("hotkey.taken"));
                         }
                     }
                     if let Ok(mut errors) = errors.lock() {

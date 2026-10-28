@@ -1,0 +1,928 @@
+_version: 2
+settings.language_system:
+  da: "Følg systemet"
+  en: "Follow the system"
+action.switch_project:
+  da: "Skift projekt"
+  en: "Switch project"
+action.pause:
+  da: "Pause / fortsæt"
+  en: "Break / resume"
+action.call:
+  da: "Telefon / afslut"
+  en: "Phone / end call"
+action.stop:
+  da: "Stop"
+  en: "Stop"
+action.toggle_window:
+  da: "Vis / skjul vindue"
+  en: "Show / hide window"
+action.fold:
+  da: "Fold sammen / ud"
+  en: "Collapse / expand"
+action.search:
+  da: "Søg i projekter"
+  en: "Search projects"
+action.timer_tab:
+  da: "Timer-fanen"
+  en: "Timer tab"
+action.history_tab:
+  da: "Historik-fanen"
+  en: "History tab"
+action.export:
+  da: "Eksportér"
+  en: "Export"
+key.space:
+  da: "Mellemrum"
+  en: "Space"
+key.unknown:
+  da: "ukendt tast i genvejen \"%{shortcut}\""
+  en: "unknown key in the shortcut \"%{shortcut}\""
+hotkey.unsupported_key:
+  da: "Tasten kan ikke bruges globalt"
+  en: "This key can't be used globally"
+hotkey.taken:
+  da: "Optaget af et andet program"
+  en: "Already used by another program"
+tray.switch_project:
+  da: "Skift projekt"
+  en: "Switch project"
+tray.stop:
+  da: "⏹ Stop"
+  en: "⏹ Stop"
+tray.hide_window:
+  da: "Skjul vinduet"
+  en: "Hide window"
+tray.show_window:
+  da: "Vis vinduet"
+  en: "Show window"
+tray.quit:
+  da: "Afslut Time Snapper"
+  en: "Quit Time Snapper"
+editor.err_project:
+  da: "Vælg et projekt"
+  en: "Choose a project"
+editor.err_date:
+  da: "Ugyldig dato (brug dd-mm-åååå)"
+  en: "Invalid date (use dd-mm-yyyy)"
+editor.err_from:
+  da: "Ugyldig fra-tid (brug tt:mm)"
+  en: "Invalid start time (use hh:mm)"
+editor.err_to:
+  da: "Ugyldig til-tid (brug tt:mm)"
+  en: "Invalid end time (use hh:mm)"
+editor.err_order:
+  da: "Til-tiden skal være efter fra-tiden"
+  en: "The end time must be after the start time"
+editor.err_dst:
+  da: "Klokkeslættet findes ikke (sommertid)"
+  en: "That time doesn't exist (daylight saving time)"
+editor.title_edit:
+  da: "✏ Ret registrering"
+  en: "✏ Edit entry"
+editor.title_new:
+  da: "➕ Ny registrering"
+  en: "➕ New entry"
+editor.project:
+  da: "Projekt"
+  en: "Project"
+editor.type:
+  da: "Type"
+  en: "Type"
+editor.type_normal:
+  da: "Normal"
+  en: "Normal"
+editor.type_phone:
+  da: "📞 Telefon"
+  en: "📞 Phone"
+editor.type_pause:
+  da: "☕ Pause"
+  en: "☕ Break"
+editor.date:
+  da: "Dato"
+  en: "Date"
+editor.date_hint:
+  da: "dd-mm-åååå"
+  en: "dd-mm-yyyy"
+editor.time:
+  da: "Tid"
+  en: "Time"
+editor.from:
+  da: "fra"
+  en: "from"
+editor.to:
+  da: "til"
+  en: "to"
+editor.note:
+  da: "Note"
+  en: "Note"
+editor.note_hint:
+  da: "Hvad er tiden brugt på?"
+  en: "What was the time spent on?"
+editor.duration:
+  da: "Varighed: %{duration}"
+  en: "Duration: %{duration}"
+editor.overlaps:
+  da: "⚠ Overlapper med:"
+  en: "⚠ Overlaps with:"
+editor.confirm_delete:
+  da: "Er du sikker på, at du vil slette registreringen?"
+  en: "Are you sure you want to delete this entry?"
+editor.yes_delete:
+  da: "🗑 Ja, slet"
+  en: "🗑 Yes, delete"
+editor.choose_project:
+  da: "Vælg projekt…"
+  en: "Choose project…"
+common.no:
+  da: "Nej"
+  en: "No"
+common.save:
+  da: "✔ Gem"
+  en: "✔ Save"
+common.cancel:
+  da: "Annuller"
+  en: "Cancel"
+common.delete:
+  da: "🗑 Slet"
+  en: "🗑 Delete"
+export.col_date:
+  da: "Dato"
+  en: "Date"
+export.col_start:
+  da: "Start"
+  en: "Start"
+export.col_end:
+  da: "Slut"
+  en: "End"
+export.col_customer:
+  da: "Kunde"
+  en: "Customer"
+export.col_project:
+  da: "Projekt"
+  en: "Project"
+export.col_type:
+  da: "Type"
+  en: "Type"
+export.col_note:
+  da: "Note"
+  en: "Note"
+export.col_duration:
+  da: "Varighed"
+  en: "Duration"
+export.col_hours:
+  da: "Timer"
+  en: "Hours"
+export.col_count:
+  da: "Antal"
+  en: "Count"
+export.col_notes:
+  da: "Noter"
+  en: "Notes"
+export.total:
+  da: "I alt"
+  en: "Total"
+export.sheet_entries:
+  da: "Registreringer"
+  en: "Entries"
+export.sheet_summary:
+  da: "Summeret"
+  en: "Summary"
+export.err_save:
+  da: "Kunne ikke gemme: %{error}"
+  en: "Couldn't save: %{error}"
+export.err_save_excel:
+  da: "Kunne ikke gemme Excel-filen: %{error}"
+  en: "Couldn't save the Excel file: %{error}"
+note.phone:
+  da: "Telefon"
+  en: "Phone"
+note.pause:
+  da: "Pause"
+  en: "Break"
+export.err_from:
+  da: "Ugyldig fra-dato (brug dd-mm-åååå)"
+  en: "Invalid start date (use dd-mm-yyyy)"
+export.err_to:
+  da: "Ugyldig til-dato (brug dd-mm-åååå)"
+  en: "Invalid end date (use dd-mm-yyyy)"
+export.err_order:
+  da: "Til-datoen skal være samme dag eller efter fra-datoen"
+  en: "The end date must be the same day as the start date or later"
+export.title:
+  da: "📤 Eksportér registreringer"
+  en: "📤 Export entries"
+export.period:
+  da: "Periode"
+  en: "Period"
+export.today:
+  da: "I dag"
+  en: "Today"
+export.this_week:
+  da: "Denne uge"
+  en: "This week"
+export.last_week:
+  da: "Sidste uge"
+  en: "Last week"
+export.this_month:
+  da: "Denne måned"
+  en: "This month"
+export.last_month:
+  da: "Sidste måned"
+  en: "Last month"
+export.from:
+  da: "Fra"
+  en: "From"
+export.to:
+  da: "til"
+  en: "to"
+export.whole_days:
+  da: "Hele dage, begge dage medregnet."
+  en: "Whole days, both days included."
+export.format:
+  da: "Format"
+  en: "Format"
+export.excel_sheets:
+  da: "Fanerne \"Registreringer\" og \"Summeret\" med totaler."
+  en: "Sheets \"Entries\" and \"Summary\" with totals."
+export.all_entries:
+  da: "Alle registreringer"
+  en: "All entries"
+export.summary:
+  da: "Summeret"
+  en: "Summary"
+export.none:
+  da: "Ingen registreringer i perioden."
+  en: "No entries in this period."
+export.summary_line:
+  da: "%{count} registreringer · i alt %{total}"
+  en: "%{count} entries · %{total} in total"
+export.saved:
+  da: "✔ Gemt: %{path}"
+  en: "✔ Saved: %{path}"
+export.open_file:
+  da: "Åbn filen"
+  en: "Open file"
+export.export_button:
+  da: "📤 Eksportér…"
+  en: "📤 Export…"
+export.save_title:
+  da: "Gem eksport"
+  en: "Save export"
+common.close:
+  da: "Luk"
+  en: "Close"
+time.minutes:
+  da: "%{minutes} min"
+  en: "%{minutes} min"
+time.hours_minutes:
+  da: "%{hours} t %{minutes} min"
+  en: "%{hours} h %{minutes} min"
+break.tip_legs:
+  da: "Rejs dig og stræk benene et par minutter."
+  en: "Stand up and stretch your legs for a couple of minutes."
+break.tip_window:
+  da: "Kig ud ad vinduet og fokusér på noget langt væk i 20 sekunder."
+  en: "Look out the window and focus on something far away for 20 seconds."
+break.tip_water:
+  da: "Hent et glas vand."
+  en: "Get a glass of water."
+break.tip_shoulders:
+  da: "Rul skuldrene og stræk nakken."
+  en: "Roll your shoulders and stretch your neck."
+break.tip_walk:
+  da: "Gå en lille tur, også selvom det bare er til kaffemaskinen."
+  en: "Go for a little walk, even if it's just to the coffee machine."
+break.tip_eyes:
+  da: "Luk øjnene og tag et par dybe vejrtrækninger."
+  en: "Close your eyes and take a few deep breaths."
+break.tip_arms:
+  da: "Stræk armene over hovedet og ræk op mod loftet."
+  en: "Stretch your arms above your head and reach for the ceiling."
+break.tip_hands:
+  da: "Ryst hænderne og stræk fingrene, de har arbejdet hårdt."
+  en: "Shake out your hands and stretch your fingers – they've been working hard."
+break.title:
+  da: "☕ Tid til en lille pause?"
+  en: "☕ Time for a short break?"
+break.worked:
+  da: "Du har arbejdet i %{length} siden sidste pause."
+  en: "You've been working for %{length} since your last break."
+break.tip:
+  da: "Tip: %{tip}"
+  en: "Tip: %{tip}"
+break.take_break:
+  da: "☕ Hold pause nu"
+  en: "☕ Take a break now"
+break.with_exercise:
+  da: "💨 Pause med øvelse"
+  en: "💨 Break with exercise"
+break.with_exercise_hint:
+  da: "Hold pause og lav en kort åndedrætsøvelse"
+  en: "Take a break and do a short breathing exercise"
+break.snooze:
+  da: "Om 10 min"
+  en: "In 10 min"
+break.skip:
+  da: "Spring over"
+  en: "Skip"
+break.skip_hint:
+  da: "Tæl forfra fra nu"
+  en: "Start counting again from now"
+breathing.ex_box:
+  da: "Boks (4-4-4-4)"
+  en: "Box (4-4-4-4)"
+breathing.ex_478:
+  da: "4-7-8 (ind, hold, ud)"
+  en: "4-7-8 (in, hold, out)"
+breathing.ex_578:
+  da: "5-7-8 (ind, hold, ud)"
+  en: "5-7-8 (in, hold, out)"
+breathing.ex_calm:
+  da: "Rolig (ind 4, ud 6)"
+  en: "Calm (in 4, out 6)"
+breathing.in:
+  da: "Træk vejret ind gennem næsen"
+  en: "Breathe in through your nose"
+breathing.hold_full:
+  da: "Hold vejret"
+  en: "Hold your breath"
+breathing.out:
+  da: "Pust langsomt ud gennem munden"
+  en: "Breathe out slowly through your mouth"
+breathing.hold_empty:
+  da: "Hold"
+  en: "Hold"
+breathing.in_hint:
+  da: "helt ned i maven, som når du dufter til en blomst"
+  en: "all the way down into your belly, like smelling a flower"
+breathing.hold_full_hint:
+  da: "med lungerne fulde, helt roligt"
+  en: "with full lungs, nice and calm"
+breathing.out_hint:
+  da: "som når du puster et lys ud"
+  en: "like blowing out a candle"
+breathing.hold_empty_hint:
+  da: "med lungerne tomme, før næste runde"
+  en: "with empty lungs, before the next round"
+breathing.window_title:
+  da: "Åndedrætsøvelse"
+  en: "Breathing exercise"
+breathing.switch_hint:
+  da: "Skift øvelse (starter forfra)"
+  en: "Switch exercise (starts over)"
+breathing.get_ready:
+  da: "Gør dig klar…"
+  en: "Get ready…"
+breathing.get_ready_hint:
+  da: "Sid godt, slap af i skuldrene"
+  en: "Sit comfortably and relax your shoulders"
+breathing.round:
+  da: "Runde %{round} af %{rounds}"
+  en: "Round %{round} of %{rounds}"
+breathing.done:
+  da: "Godt gået!"
+  en: "Well done!"
+breathing.done_hint:
+  da: "Nyd resten af pausen."
+  en: "Enjoy the rest of your break."
+breathing.again:
+  da: "Én gang til"
+  en: "Once more"
+breathing.stop:
+  da: "Stop"
+  en: "Stop"
+breathing.stop_hint:
+  da: "Stop øvelsen (pausen fortsætter)"
+  en: "Stop the exercise (the break continues)"
+shortcuts.title:
+  da: "⌨ Genvejstaster"
+  en: "⌨ Keyboard shortcuts"
+shortcuts.help:
+  da: "Klik på en genvej og tryk de nye taster. Delete fjerner genvejen, Esc fortryder."
+  en: "Click a shortcut and press the new keys. Delete removes the shortcut, Esc cancels."
+shortcuts.col_action:
+  da: "Handling"
+  en: "Action"
+shortcuts.col_local:
+  da: "I programmet"
+  en: "In the app"
+shortcuts.col_global:
+  da: "Global"
+  en: "Global"
+shortcuts.col_global_hint:
+  da: "Virker også når et andet program har fokus"
+  en: "Also works when another program has focus"
+shortcuts.linux_later:
+  da: "Globale genveje på Linux kommer senere"
+  en: "Global shortcuts on Linux are coming later"
+shortcuts.reset:
+  da: "Nulstil til standard"
+  en: "Reset to defaults"
+shortcuts.err_modifier:
+  da: "%{combo} skal kombineres med Ctrl, Alt eller Shift (F-taster kan stå alene)."
+  en: "%{combo} must be combined with Ctrl, Alt or Shift (F keys can be used on their own)."
+shortcuts.err_taken:
+  da: "%{combo} bruges allerede til \"%{action}\"."
+  en: "%{combo} is already used for \"%{action}\"."
+shortcuts.press_keys:
+  da: "Tryk taster…"
+  en: "Press keys…"
+common.no_timer:
+  da: "Ingen tid kører"
+  en: "No timer running"
+common.phone_call:
+  da: "📞 Telefonopkald"
+  en: "📞 Phone call"
+common.search_hint:
+  da: "🔍 Søg kunde eller projekt…"
+  en: "🔍 Search customer or project…"
+common.customer:
+  da: "Kunde"
+  en: "Customer"
+common.project:
+  da: "Projekt"
+  en: "Project"
+bar.resume_on:
+  da: "Fortsæt på %{project}"
+  en: "Resume %{project}"
+bar.end_break:
+  da: "Afslut pausen"
+  en: "End the break"
+bar.break:
+  da: "Pause (Intern tid)"
+  en: "Break (Internal time)"
+bar.end_call_resume:
+  da: "Afslut opkaldet og fortsæt på %{project}"
+  en: "End the call and resume %{project}"
+bar.end_call:
+  da: "Afslut opkaldet"
+  en: "End the call"
+bar.phone:
+  da: "Telefon"
+  en: "Phone"
+bar.expand:
+  da: "Fold ud til det fulde program"
+  en: "Expand to the full app"
+bar.stop:
+  da: "Stop"
+  en: "Stop"
+bar.switch_project:
+  da: "Skift projekt"
+  en: "Switch project"
+bar.click_to_switch:
+  da: "Klik for at skifte projekt"
+  en: "Click to switch project"
+picker.title:
+  da: "Skift projekt"
+  en: "Switch project"
+picker.move_title:
+  da: "Flyt tidstagningen til"
+  en: "Move the timer to"
+picker.close:
+  da: "Luk (Esc)"
+  en: "Close (Esc)"
+picker.create:
+  da: "Opret"
+  en: "Create"
+picker.create_hint:
+  da: "Opret og start tid"
+  en: "Create and start the timer"
+picker.new_project:
+  da: "Nyt projekt"
+  en: "New project"
+picker.no_match:
+  da: "Ingen projekter matcher søgningen."
+  en: "No projects match the search."
+autostart.err_exe:
+  da: "Kunne ikke finde programfilen: %{error}"
+  en: "Couldn't find the program file: %{error}"
+autostart.err_old_shortcut:
+  da: "Kunne ikke fjerne den gamle genvej: %{error}"
+  en: "Couldn't remove the old shortcut: %{error}"
+autostart.err_windows:
+  da: "Kunne ikke ændre automatisk start (Windows-fejl %{code})"
+  en: "Couldn't change automatic start (Windows error %{code})"
+autostart.err_folder:
+  da: "Kunne ikke finde mappen ~/.config/autostart"
+  en: "Couldn't find the folder ~/.config/autostart"
+autostart.err_disable:
+  da: "Kunne ikke slå automatisk start fra: %{error}"
+  en: "Couldn't turn off automatic start: %{error}"
+autostart.err_create:
+  da: "Kunne ikke oprette %{path}: %{error}"
+  en: "Couldn't create %{path}: %{error}"
+autostart.err_enable:
+  da: "Kunne ikke slå automatisk start til: %{error}"
+  en: "Couldn't turn on automatic start: %{error}"
+data.err_read:
+  da: "Kunne ikke læse %{path}: %{error}"
+  en: "Couldn't read %{path}: %{error}"
+data.err_open:
+  da: "Kunne ikke åbne %{path}: %{error}"
+  en: "Couldn't open %{path}: %{error}"
+data.err_folder:
+  da: "Kunne ikke oprette mappe: %{error}"
+  en: "Couldn't create folder: %{error}"
+data.err_save:
+  da: "Kunne ikke gemme: %{error}"
+  en: "Couldn't save: %{error}"
+data.err_empty_name:
+  da: "Navnet må ikke være tomt"
+  en: "The name can't be empty"
+data.err_customer_exists:
+  da: "Der findes allerede en kunde med det navn"
+  en: "There's already a customer with that name"
+data.err_no_customer:
+  da: "Kunden findes ikke"
+  en: "The customer doesn't exist"
+data.err_no_project:
+  da: "Projektet findes ikke"
+  en: "The project doesn't exist"
+data.err_project_exists:
+  da: "Kunden har allerede et projekt med det navn"
+  en: "The customer already has a project with that name"
+data.deleted_project:
+  da: "(slettet projekt)"
+  en: "(deleted project)"
+timer.calls_waiting:
+  da: "📞 %{count} opkald mangler registrering"
+  en: "📞 %{count} call(s) need a project"
+timer.choose_project:
+  da: "Vælg et projekt for at starte"
+  en: "Choose a project to start"
+timer.end_call:
+  da: "📞 Afslut"
+  en: "📞 End call"
+timer.end_call_resume_hint:
+  da: "Afslut opkaldet og fortsæt på %{project}"
+  en: "End the call and resume %{project}"
+timer.end_call_hint:
+  da: "Afslut opkaldet"
+  en: "End the call"
+timer.phone:
+  da: "📞 Telefon"
+  en: "📞 Phone"
+timer.phone_hint:
+  da: "Start tid på et opkald. Tryk igen for at afslutte og fortsætte, hvor du slap."
+  en: "Time a phone call. Press again to end it and continue where you left off."
+timer.resume:
+  da: "▶ Fortsæt"
+  en: "▶ Resume"
+timer.resume_hint:
+  da: "Afslut pausen og fortsæt på %{project}"
+  en: "End the break and resume %{project}"
+timer.end_break:
+  da: "☕ Afslut pause"
+  en: "☕ End break"
+timer.end_break_hint:
+  da: "Afslut pausen og stop tiden"
+  en: "End the break and stop the timer"
+timer.break:
+  da: "☕ Pause"
+  en: "☕ Break"
+timer.break_hint:
+  da: "Registreres på Intern tid. Tryk igen for at fortsætte, hvor du slap."
+  en: "Recorded as internal time. Press again to continue where you left off."
+timer.stop:
+  da: "⏹ Stop"
+  en: "⏹ Stop"
+timer.stop_hint:
+  da: "Stop tiden"
+  en: "Stop the timer"
+timer.breathing:
+  da: "💨 Åndedrætsøvelse"
+  en: "💨 Breathing exercise"
+timer.breathing_running:
+  da: "💨 Åndedrætsøvelse kører…"
+  en: "💨 Breathing exercise running…"
+timer.breathing_hint:
+  da: "En kort guidet vejrtrækning i et lille vindue"
+  en: "A short guided breathing exercise in a small window"
+timer.note_hint:
+  da: "📝 Note til denne tidstagning…"
+  en: "📝 Note for this timer…"
+list.sort_name:
+  da: "A–Å"
+  en: "A–Z"
+list.sort_name_hint:
+  da: "Sorteret efter navn. Klik for senest brugt først"
+  en: "Sorted by name. Click to show the most recently used first"
+list.sort_recent:
+  da: "Senest"
+  en: "Recent"
+list.sort_recent_hint:
+  da: "Senest brugte først. Klik for at sortere efter navn"
+  en: "Most recently used first. Click to sort by name"
+list.new_customer:
+  da: "Ny kunde…"
+  en: "New customer…"
+list.new_project:
+  da: "Nyt projekt…"
+  en: "New project…"
+list.rename:
+  da: "✏ Omdøb…"
+  en: "✏ Rename…"
+list.delete_project:
+  da: "🗑 Slet projekt…"
+  en: "🗑 Delete project…"
+list.delete_customer:
+  da: "🗑 Slet kunde…"
+  en: "🗑 Delete customer…"
+list.internal_project_locked:
+  da: "Intern tid kan ikke slettes"
+  en: "Internal time can't be deleted"
+list.internal_customer_locked:
+  da: "Den interne konto kan ikke slettes"
+  en: "The internal account can't be deleted"
+list.expand_all:
+  da: "⊞ Udfold alle"
+  en: "⊞ Expand all"
+list.collapse_all:
+  da: "⊟ Sammenklap alle"
+  en: "⊟ Collapse all"
+list.menu_sort_name:
+  da: "Sortér efter navn"
+  en: "Sort by name"
+list.menu_sort_recent:
+  da: "Sortér efter senest brugt"
+  en: "Sort by recently used"
+list.no_match:
+  da: "Ingen kunder eller projekter matcher søgningen."
+  en: "No customers or projects match the search."
+day.today:
+  da: "I dag"
+  en: "Today"
+day.today_time:
+  da: "I dag %{time}"
+  en: "Today %{time}"
+day.rounded:
+  da: "afrundet %{time}"
+  en: "rounded %{time}"
+day.rounded_hint:
+  da: "Med de afrundinger du har lavet i Historik → Summeret"
+  en: "Including the rounding you've chosen in History → Summary"
+day.project_total:
+  da: "Projekt i alt"
+  en: "Project total"
+day.hide:
+  da: "Skjul dagens tid"
+  en: "Hide today's time"
+day.show:
+  da: "Vis dagens tid og projektets samlede tid"
+  en: "Show today's time and the project's total time"
+timer.move_hint:
+  da: "Flyt den kørende tid til et andet projekt (uret fortsætter)"
+  en: "Move the running time to another project (the clock keeps going)"
+history.today:
+  da: "I dag"
+  en: "Today"
+history.summary:
+  da: "Summeret"
+  en: "Summary"
+history.all:
+  da: "Alle registreringer"
+  en: "All entries"
+history.export_hint:
+  da: "Eksportér til Excel/CSV"
+  en: "Export to Excel/CSV"
+history.add_hint:
+  da: "Tilføj registrering"
+  en: "Add entry"
+history.none:
+  da: "Ingen registreringer denne dag."
+  en: "No entries on this day."
+history.col_time:
+  da: "Tid"
+  en: "Time"
+history.col_rounded:
+  da: "Afrundet"
+  en: "Rounded"
+history.col_rounded_hint:
+  da: "Rundet op til nærmeste påbegyndte kvarter"
+  en: "Rounded up to the next quarter hour"
+history.notes:
+  da: "Noter:"
+  en: "Notes:"
+history.entry_count:
+  da: "%{count} registreringer"
+  en: "%{count} entries"
+history.exact_quarter:
+  da: "Præcis på et kvarter"
+  en: "Exactly on a quarter hour"
+history.rounded_up_hint:
+  da: "Rundet op fra %{from}. Klik for at runde ned til %{to}"
+  en: "Rounded up from %{from}. Click to round down to %{to}"
+history.rounded_down_hint:
+  da: "Rundet ned manuelt fra %{from}. Klik for at runde op til %{to}"
+  en: "Rounded down manually from %{from}. Click to round up to %{to}"
+history.click_to_edit:
+  da: "Klik for at rette"
+  en: "Click to edit"
+history.edit:
+  da: "✏ Ret…"
+  en: "✏ Edit…"
+history.delete:
+  da: "🗑 Slet…"
+  en: "🗑 Delete…"
+history.running:
+  da: "Kører stadig. Stop timeren for at rette den."
+  en: "Still running. Stop the timer to edit it."
+history.total:
+  da: "I alt"
+  en: "Total"
+history.rounded_total_hint:
+  da: "Summen af de afrundede tider pr. projekt"
+  en: "The sum of the rounded times per project"
+settings.title:
+  da: "Indstillinger"
+  en: "Settings"
+tabs.timer:
+  da: "⏱ Timer"
+  en: "⏱ Timer"
+tabs.history:
+  da: "📅 Historik"
+  en: "📅 History"
+tabs.fold_hint:
+  da: "Fold sammen til en lille bjælke"
+  en: "Collapse into a small bar"
+tabs.on_top_hint:
+  da: "Hold vinduet øverst"
+  en: "Keep the window on top"
+call.more_waiting:
+  da: "%{count} opkald mere venter"
+  en: "%{count} more call(s) waiting"
+call.where:
+  da: "Hvor skal tiden registreres?"
+  en: "Where should the time go?"
+call.or_type:
+  da: "Eller skriv kunde og projekt (oprettes hvis de ikke findes):"
+  en: "Or type a customer and project (created if they don't exist):"
+call.register:
+  da: "✔ Registrér"
+  en: "✔ Save"
+call.later:
+  da: "Senere"
+  en: "Later"
+call.discard:
+  da: "🗑 Kassér"
+  en: "🗑 Discard"
+call.discard_hint:
+  da: "Opkaldet registreres ikke"
+  en: "The call won't be recorded"
+call.register_on:
+  da: "Registrér opkaldet på:"
+  en: "Record the call on:"
+call.choose_existing:
+  da: "Vælg eksisterende projekt…"
+  en: "Choose an existing project…"
+rename.customer_title:
+  da: "✏ Omdøb kunde"
+  en: "✏ Rename customer"
+rename.project_title:
+  da: "✏ Omdøb projekt hos %{customer}"
+  en: "✏ Rename project for %{customer}"
+delete.customer_title:
+  da: "Slet kunde"
+  en: "Delete customer"
+delete.project_title:
+  da: "Slet projekt"
+  en: "Delete project"
+delete.customer_details:
+  da: "Kundens %{projects} projekt(er) slettes også. %{count} registrering(er) (%{total}) bevares i historikken."
+  en: "The customer's %{projects} project(s) are deleted too. %{count} entries (%{total}) are kept in the history."
+delete.project_details:
+  da: "%{count} registrering(er) (%{total}) bevares i historikken."
+  en: "%{count} entries (%{total}) are kept in the history."
+delete.confirm:
+  da: "Er du sikker på, at du vil slette \"%{name}\"?"
+  en: "Are you sure you want to delete \"%{name}\"?"
+delete.timer_running:
+  da: "Timeren kører på dette projekt og bliver stoppet."
+  en: "The timer is running on this project and will be stopped."
+tray.resume_on:
+  da: "▶ Fortsæt på %{project}"
+  en: "▶ Resume %{project}"
+tray.end_call_resume:
+  da: "📞 Afslut opkald og fortsæt på %{project}"
+  en: "📞 End call and resume %{project}"
+tray.end_call:
+  da: "📞 Afslut opkald"
+  en: "📞 End call"
+settings.language:
+  da: "Sprog"
+  en: "Language"
+settings.theme:
+  da: "Tema"
+  en: "Theme"
+settings.theme_system:
+  da: "💻 Følg systemet"
+  en: "💻 Follow the system"
+settings.theme_light:
+  da: "☀ Lyst"
+  en: "☀ Light"
+settings.theme_dark:
+  da: "🌙 Mørkt"
+  en: "🌙 Dark"
+settings.start:
+  da: "Start"
+  en: "Startup"
+settings.autostart:
+  da: "Start Time Snapper, når jeg logger på"
+  en: "Start Time Snapper when I log in"
+settings.new_customers:
+  da: "Nye kunder"
+  en: "New customers"
+settings.new_customers_hint:
+  da: "Projekter som alle nye kunder får. Med Auto start starter tiden på projektet, når kunden oprettes."
+  en: "Projects every new customer gets. With Auto start, the timer starts on that project when the customer is created."
+settings.auto_start:
+  da: "Auto start"
+  en: "Auto start"
+settings.remove_template:
+  da: "Fjern fra skabelonen"
+  en: "Remove from the template"
+settings.break_reminder:
+  da: "Pausepåmindelse"
+  en: "Break reminder"
+settings.break_reminder_check:
+  da: "Mind mig om at holde en kort pause"
+  en: "Remind me to take a short break"
+settings.after:
+  da: "Efter"
+  en: "After"
+settings.break_reminder_hint:
+  da: "Arbejdstid tælles fra sidste pause, eller fra du har været væk eller haft tiden stoppet i mindst 5 min."
+  en: "Work time is counted from your last break, or from when you were away or had the timer stopped for at least 5 min."
+settings.length:
+  da: "Længde"
+  en: "Length"
+settings.breathing_auto:
+  da: "Start øvelsen, når jeg holder pause"
+  en: "Start the exercise when I take a break"
+settings.try_now:
+  da: "💨 Prøv nu"
+  en: "💨 Try it now"
+settings.away:
+  da: "Væk fra computeren"
+  en: "Away from the computer"
+settings.away_check:
+  da: "Spørg om tiden skal være pause, når jeg har været væk"
+  en: "Ask whether the time should be a break when I've been away"
+settings.away_hint:
+  da: "Gælder når der kører tid på et projekt, og man ikke har rørt mus eller tastatur."
+  en: "Applies when a project timer is running and the mouse and keyboard haven't been touched."
+settings.shortcuts:
+  da: "Genvejstaster"
+  en: "Keyboard shortcuts"
+settings.shortcuts_button:
+  da: "⌨ Genvejstaster…"
+  en: "⌨ Keyboard shortcuts…"
+settings.tray:
+  da: "Systembakke"
+  en: "System tray"
+settings.close_to_tray:
+  da: "Luk til systembakken (tiden kører videre)"
+  en: "Close to the system tray (the timer keeps running)"
+settings.tray_hint:
+  da: "Afslut helt via ikonet i systembakken. Venstreklik på ikonet viser vinduet."
+  en: "Quit completely from the tray icon. Left-click the icon to show the window."
+sleep.title:
+  da: "🌙 Computeren har sovet"
+  en: "🌙 The computer was asleep"
+sleep.period:
+  da: "Fra %{from} til %{to}."
+  en: "From %{from} to %{to}."
+sleep.stopped:
+  da: "Tiden blev stoppet kl. %{time}."
+  en: "The timer was stopped at %{time}."
+sleep.resume_question:
+  da: "Fortsæt på %{project}?"
+  en: "Resume %{project}?"
+sleep.no_thanks:
+  da: "Nej tak"
+  en: "No thanks"
+away.title:
+  da: "👋 Velkommen tilbage"
+  en: "👋 Welcome back"
+away.period:
+  da: "Du har været væk fra computeren fra %{from} til %{to} (%{length})."
+  en: "You've been away from the computer from %{from} to %{to} (%{length})."
+away.meanwhile:
+  da: "Imens kørte tiden på %{project}."
+  en: "Meanwhile, the timer was running on %{project}."
+away.question:
+  da: "Skal tiden registreres som pause?"
+  en: "Should the time be recorded as a break?"
+away.yes:
+  da: "☕ Ja, som pause"
+  en: "☕ Yes, as a break"
+away.no:
+  da: "Nej, behold på projektet"
+  en: "No, keep it on the project"
+internal.customer:
+  da: "Intern"
+  en: "Internal"
+internal.project:
+  da: "Intern tid"
+  en: "Internal time"

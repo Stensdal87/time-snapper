@@ -149,7 +149,7 @@ impl TimeSnapperApp {
         let on_call = active.is_some_and(|a| a.project_id.is_none());
         let on_pause = active.is_some_and(|a| a.is_note(NOTE_PAUSE));
         let (color, time, label) = match active {
-            None => (ui.visuals().weak_text_color(), "0:00:00".to_owned(), "Ingen tid kører".to_owned()),
+            None => (ui.visuals().weak_text_color(), "0:00:00".to_owned(), tr!("common.no_timer")),
             Some(a) => {
                 let color = if on_pause {
                     Color32::from_rgb(240, 170, 60)
@@ -160,29 +160,29 @@ impl TimeSnapperApp {
                 };
                 let label = match a.project_id {
                     Some(id) => self.data.project_label(id),
-                    None => "📞 Telefonopkald".to_owned(),
+                    None => tr!("common.phone_call"),
                 };
                 (color, format_duration(a.elapsed()), label)
             }
         };
         let resume = self.data.resume_project().map(|id| self.data.project_label(id));
         let pause_hover = match &resume {
-            Some(label) if on_pause => format!("Fortsæt på {label}"),
-            _ if on_pause => "Afslut pausen".to_owned(),
-            _ => "Pause (Intern tid)".to_owned(),
+            Some(label) if on_pause => tr!("bar.resume_on", project = label),
+            _ if on_pause => tr!("bar.end_break"),
+            _ => tr!("bar.break"),
         };
         let call_hover = match &resume {
-            Some(label) if on_call => format!("Afslut opkaldet og fortsæt på {label}"),
-            _ if on_call => "Afslut opkaldet".to_owned(),
-            _ => "Telefon".to_owned(),
+            Some(label) if on_call => tr!("bar.end_call_resume", project = label),
+            _ if on_call => tr!("bar.end_call"),
+            _ => tr!("bar.phone"),
         };
 
         let hint = |action| self.shortcut_hint(action);
         let (fold_hover, stop_hover, call_hover, switch_hover) = (
-            format!("Fold ud til det fulde program{}", hint(Action::Fold)),
-            format!("Stop{}", hint(Action::Stop)),
+            format!("{}{}", tr!("bar.expand"), hint(Action::Fold)),
+            format!("{}{}", tr!("bar.stop"), hint(Action::Stop)),
             format!("{call_hover}{}", hint(Action::Call)),
-            format!("Skift projekt{}", hint(Action::SwitchProject)),
+            format!("{}{}", tr!("bar.switch_project"), hint(Action::SwitchProject)),
         );
         let pause_hover = format!("{pause_hover}{}", hint(Action::Pause));
         let mut open_picker = false;
@@ -204,7 +204,7 @@ impl TimeSnapperApp {
                     self.data.toggle_pause();
                     self.save();
                 }
-                if on_pause && self.breathing.is_none() && icon_button(ui, "💨", "Åndedrætsøvelse", true, false) {
+                if on_pause && self.breathing.is_none() && icon_button(ui, "💨", &tr!("breathing.window_title"), true, false) {
                     self.start_breathing();
                 }
                 if icon_button(ui, "📞", &call_hover, true, on_call) {
@@ -218,7 +218,7 @@ impl TimeSnapperApp {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     let response = ui
                         .add(egui::Label::new(RichText::new(&label).weak()).truncate().sense(egui::Sense::click()))
-                        .on_hover_text(format!("{label}\nKlik for at skifte projekt"));
+                        .on_hover_text(format!("{label}\n{}", tr!("bar.click_to_switch")));
                     open_picker |= response.clicked();
                 });
             });
@@ -242,14 +242,14 @@ impl TimeSnapperApp {
         let mut close = false;
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new(if picker.moving { "Flyt tidstagningen til" } else { "Skift projekt" }).strong());
+            ui.label(RichText::new(if picker.moving { tr!("picker.move_title") } else { tr!("picker.title") }).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close |= ui.small_button("×").on_hover_text("Luk (Esc)").clicked();
+                close |= ui.small_button("×").on_hover_text(tr!("picker.close")).clicked();
             });
         });
         let response = ui.add(
             egui::TextEdit::singleline(&mut picker.search)
-                .hint_text("🔍 Søg kunde eller projekt…")
+                .hint_text(tr!("common.search_hint"))
                 .desired_width(f32::INFINITY),
         );
         if !picker.focused {
@@ -263,11 +263,11 @@ impl TimeSnapperApp {
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - 90.0) / 2.0;
-                ui.add(egui::TextEdit::singleline(&mut picker.new_customer).hint_text("Kunde").desired_width(width));
-                ui.add(egui::TextEdit::singleline(&mut picker.new_project).hint_text("Projekt").desired_width(width));
-                create |= ui.add_enabled(complete, egui::Button::new("Opret")).on_hover_text("Opret og start tid").clicked();
+                ui.add(egui::TextEdit::singleline(&mut picker.new_customer).hint_text(tr!("common.customer")).desired_width(width));
+                ui.add(egui::TextEdit::singleline(&mut picker.new_project).hint_text(tr!("common.project")).desired_width(width));
+                create |= ui.add_enabled(complete, egui::Button::new(tr!("picker.create"))).on_hover_text(tr!("picker.create_hint")).clicked();
             });
-            ui.label(RichText::new("Nyt projekt").weak().small());
+            ui.label(RichText::new(tr!("picker.new_project")).weak().small());
             ui.separator();
 
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -291,7 +291,7 @@ impl TimeSnapperApp {
                         }
                     }
                     if matches.is_empty() {
-                        ui.label(RichText::new("Ingen projekter matcher søgningen.").weak());
+                        ui.label(RichText::new(tr!("picker.no_match")).weak());
                     }
                 });
             });

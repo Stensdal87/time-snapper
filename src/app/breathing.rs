@@ -31,12 +31,12 @@ pub enum Exercise {
 impl Exercise {
     pub const ALL: [Exercise; 4] = [Exercise::Box, Exercise::FourSevenEight, Exercise::FiveSevenEight, Exercise::Calm];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Exercise::Box => "Boks (4-4-4-4)",
-            Exercise::FourSevenEight => "4-7-8 (ind, hold, ud)",
-            Exercise::FiveSevenEight => "5-7-8 (ind, hold, ud)",
-            Exercise::Calm => "Rolig (ind 4, ud 6)",
+            Exercise::Box => tr!("breathing.ex_box"),
+            Exercise::FourSevenEight => tr!("breathing.ex_478"),
+            Exercise::FiveSevenEight => tr!("breathing.ex_578"),
+            Exercise::Calm => tr!("breathing.ex_calm"),
         }
     }
 
@@ -76,21 +76,21 @@ impl Phase {
         }
     }
 
-    fn text(self) -> &'static str {
+    fn text(self) -> String {
         match self {
-            Phase::In => "Træk vejret ind gennem næsen",
-            Phase::HoldFull => "Hold vejret",
-            Phase::Out => "Pust langsomt ud gennem munden",
-            Phase::HoldEmpty => "Hold",
+            Phase::In => tr!("breathing.in"),
+            Phase::HoldFull => tr!("breathing.hold_full"),
+            Phase::Out => tr!("breathing.out"),
+            Phase::HoldEmpty => tr!("breathing.hold_empty"),
         }
     }
 
-    fn hint(self) -> &'static str {
+    fn hint(self) -> String {
         match self {
-            Phase::In => "helt ned i maven, som når du dufter til en blomst",
-            Phase::HoldFull => "med lungerne fulde, helt roligt",
-            Phase::Out => "som når du puster et lys ud",
-            Phase::HoldEmpty => "med lungerne tomme, før næste runde",
+            Phase::In => tr!("breathing.in_hint"),
+            Phase::HoldFull => tr!("breathing.hold_full_hint"),
+            Phase::Out => tr!("breathing.out_hint"),
+            Phase::HoldEmpty => tr!("breathing.hold_empty_hint"),
         }
     }
 
@@ -163,7 +163,7 @@ impl TimeSnapperApp {
         let mut chosen = exercise;
 
         let builder = egui::ViewportBuilder::default()
-            .with_title("Åndedrætsøvelse")
+            .with_title(tr!("breathing.window_title"))
             .with_inner_size([300.0, 410.0])
             .with_resizable(false)
             .with_always_on_top();
@@ -180,19 +180,19 @@ impl TimeSnapperApp {
                             }
                         })
                         .response
-                        .on_hover_text("Skift øvelse (starter forfra)");
+                        .on_hover_text(tr!("breathing.switch_hint"));
                 });
                 ui.add_space(4.0);
                 ui.vertical_centered(|ui| match &step {
                     Step::Prepare { left } => {
                         ui.add_space(30.0);
-                        ui.heading("Gør dig klar…");
-                        ui.label(RichText::new("Sid godt, slap af i skuldrene").weak());
+                        ui.heading(tr!("breathing.get_ready"));
+                        ui.label(RichText::new(tr!("breathing.get_ready_hint")).weak());
                         draw_box(ui, exercise, None);
                         ui.label(RichText::new(format!("{}", left.ceil() as u32)).size(28.0).strong());
                     }
                     Step::Phase { round, index, phase, progress, left } => {
-                        ui.label(RichText::new(format!("Runde {round} af {rounds}")).weak());
+                        ui.label(RichText::new(tr!("breathing.round", round = round, rounds = rounds)).weak());
                         draw_box(ui, exercise, Some((*index, *phase, *progress, *left)));
                         ui.label(RichText::new(format!("{} {}", phase.icon(), phase.text())).size(17.0).strong());
                         ui.label(RichText::new(phase.hint()).italics().weak());
@@ -200,19 +200,19 @@ impl TimeSnapperApp {
                     Step::Done => {
                         ui.add_space(70.0);
                         ui.label(RichText::new("🌟").size(48.0).color(Color32::from_rgb(240, 190, 80)));
-                        ui.heading("Godt gået!");
-                        ui.label(RichText::new("Nyd resten af pausen.").weak());
+                        ui.heading(tr!("breathing.done"));
+                        ui.label(RichText::new(tr!("breathing.done_hint")).weak());
                         ui.add_space(20.0);
                         ui.horizontal(|ui| {
                             ui.add_space((ui.available_width() - 150.0) / 2.0);
-                            again |= ui.button("Én gang til").clicked();
-                            close |= ui.button("Luk").clicked();
+                            again |= ui.button(tr!("breathing.again")).clicked();
+                            close |= ui.button(tr!("common.close")).clicked();
                         });
                     }
                 });
                 if step != Step::Done {
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        close |= ui.button("Stop").on_hover_text("Stop øvelsen (pausen fortsætter)").clicked();
+                        close |= ui.button(tr!("breathing.stop")).on_hover_text(tr!("breathing.stop_hint")).clicked();
                     });
                 }
             });

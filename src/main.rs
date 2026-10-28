@@ -1,6 +1,18 @@
 // Skjul konsolvinduet på Windows i release-builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Oversættelser i locales/app.yml (dansk og engelsk side om side). Mangler en
+// tekst på et sprog, bruges den danske.
+rust_i18n::i18n!("locales", fallback = "da");
+
+/// Oversat tekst som `String` (klar til egui): `tr!("nøgle")`, eller
+/// `tr!("nøgle", navn = værdi)` til pladsholderen `%{navn}` i teksten.
+macro_rules! tr {
+    ($($arg:tt)*) => {
+        rust_i18n::t!($($arg)*).to_string()
+    };
+}
+
 mod app;
 mod autostart;
 mod data;
@@ -8,8 +20,10 @@ mod entry_editor;
 mod export;
 mod export_dialog;
 mod hotkeys;
+mod i18n;
 mod idle;
 mod shortcuts;
+mod single_instance;
 mod tray;
 
 use eframe::egui;
@@ -18,6 +32,11 @@ const APP_NAME: &str = "Time Snapper";
 
 fn main() -> eframe::Result {
     migrate_from_old_name();
+    let path = data::Data::default_path();
+    // Kører programmet allerede, er det nu bedt om at vise sig; denne kopi stopper.
+    let Some(instance) = single_instance::start(&single_instance::port_file(&path)) else {
+        return Ok(());
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
@@ -47,7 +66,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         APP_NAME,
         options,
-        Box::new(|cc| Ok(Box::new(app::TimeSnapperApp::new(&cc.egui_ctx, data::Data::default_path())))),
+        Box::new(|cc| Ok(Box::new(app::TimeSnapperApp::new(&cc.egui_ctx, path).with_instance(instance)))),
     )
 }
 
@@ -85,15 +104,15 @@ mod tests {
         let mut available = view.characters(&FontFamily::Proportional).clone();
         available.extend(view.characters(&FontFamily::Monospace).clone());
 
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![src.clone()];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = vec![root.join("src"), root.join("locales")];
         let mut missing = Vec::new();
         while let Some(path) = files.pop() {
             if path.is_dir() {
                 files.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
                 continue;
             }
-            if path.extension().is_none_or(|e| e != "rs") {
+            if path.extension().is_none_or(|e| e != "rs" && e != "yml") {
                 continue;
             }
             for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {

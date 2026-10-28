@@ -224,6 +224,7 @@ pub struct Settings {
     pub customer_template: Vec<TemplateProject>,
     /// Rækkefølge af kunder og projekter i listerne (issue #2).
     pub sort: SortOrder,
+    pub language: crate::i18n::Language,
 }
 
 /// Et projekt i kundeskabelonen.
@@ -258,6 +259,7 @@ impl Default for Settings {
             shortcuts: Default::default(),
             customer_template: Vec::new(),
             sort: SortOrder::Name,
+            language: Default::default(),
         }
     }
 }
@@ -295,9 +297,9 @@ impl Data {
     pub fn load(path: &Path) -> Result<Self, String> {
         let mut data: Data = match std::fs::read_to_string(path) {
             Ok(text) => serde_json::from_str(&text)
-                .map_err(|e| format!("Kunne ikke læse {}: {e}", path.display()))?,
+                .map_err(|e| tr!("data.err_read", path = path.display(), error = e))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Data::default(),
-            Err(e) => return Err(format!("Kunne ikke åbne {}: {e}", path.display())),
+            Err(e) => return Err(tr!("data.err_open", path = path.display(), error = e)),
         };
         // En timer der stadig "kører" i filen betyder at programmet ikke blev
         // lukket pænt. Afslut den ved sidste livstegn i stedet for at tælle videre.
@@ -312,12 +314,12 @@ impl Data {
     /// ikke bliver ødelagt hvis programmet stoppes midt i en skrivning.
     pub fn save(&self, path: &Path) -> Result<(), String> {
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("Kunne ikke oprette mappe: {e}"))?;
+            std::fs::create_dir_all(dir).map_err(|e| tr!("data.err_folder", error = e))?;
         }
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, text).map_err(|e| format!("Kunne ikke gemme: {e}"))?;
-        std::fs::rename(&tmp, path).map_err(|e| format!("Kunne ikke gemme: {e}"))
+        std::fs::write(&tmp, text).map_err(|e| tr!("data.err_save", error = e))?;
+        std::fs::rename(&tmp, path).map_err(|e| tr!("data.err_save", error = e))
     }
 
     fn new_id(&mut self) -> Id {
@@ -348,6 +350,32 @@ impl Data {
         let id = self.add_project(customer, "Intern tid");
         self.internal_project = Some(id);
         id
+    }
+
+    /// Giver den interne kunde og "Intern tid" navne på det aktuelle sprog –
+    /// men kun hvis de stadig har et af standardnavnene (ikke hvis brugeren
+    /// selv har omdøbt dem).
+    pub fn localize_internal_names(&mut self) {
+        let lang = rust_i18n::locale().to_string();
+        self.localize_internal_names_in(&lang);
+    }
+
+    fn localize_internal_names_in(&mut self, lang: &str) {
+        const CUSTOMER_DEFAULTS: [&str; 2] = ["Intern", "Internal"];
+        const PROJECT_DEFAULTS: [&str; 2] = ["Intern tid", "Internal time"];
+        let Some(id) = self.internal_project else { return };
+        let customer_name = rust_i18n::t!("internal.customer", locale = lang).to_string();
+        let project_name = rust_i18n::t!("internal.project", locale = lang).to_string();
+        let Some(project) = self.projects.iter_mut().find(|p| p.id == id) else { return };
+        if PROJECT_DEFAULTS.contains(&project.name.as_str()) {
+            project.name = project_name;
+        }
+        let customer_id = project.customer_id;
+        if let Some(customer) = self.customers.iter_mut().find(|c| c.id == customer_id)
+            && CUSTOMER_DEFAULTS.contains(&customer.name.as_str())
+        {
+            customer.name = customer_name;
+        }
     }
 
     /// Kunder der ikke er slettet: den interne kunde først, derefter efter
@@ -491,12 +519,12 @@ impl Data {
     pub fn rename_customer(&mut self, customer_id: Id, name: &str) -> Result<(), String> {
         let name = name.trim();
         if name.is_empty() {
-            return Err("Navnet må ikke være tomt".to_owned());
+            return Err(tr!("data.err_empty_name"));
         }
         if self.visible_customers().any(|c| c.id != customer_id && same_name(&c.name, name)) {
-            return Err("Der findes allerede en kunde med det navn".to_owned());
+            return Err(tr!("data.err_customer_exists"));
         }
-        let customer = self.customers.iter_mut().find(|c| c.id == customer_id).ok_or("Kunden findes ikke")?;
+        let customer = self.customers.iter_mut().find(|c| c.id == customer_id).ok_or_else(|| tr!("data.err_no_customer"))?;
         customer.name = name.to_owned();
         Ok(())
     }
@@ -506,14 +534,14 @@ impl Data {
     pub fn rename_project(&mut self, project_id: Id, name: &str) -> Result<(), String> {
         let name = name.trim();
         if name.is_empty() {
-            return Err("Navnet må ikke være tomt".to_owned());
+            return Err(tr!("data.err_empty_name"));
         }
-        let customer_id = self.project(project_id).ok_or("Projektet findes ikke")?.customer_id;
+        let customer_id = self.project(project_id).ok_or_else(|| tr!("data.err_no_project"))?.customer_id;
         if self
             .visible_projects()
             .any(|p| p.id != project_id && p.customer_id == customer_id && same_name(&p.name, name))
         {
-            return Err("Kunden har allerede et projekt med det navn".to_owned());
+            return Err(tr!("data.err_project_exists"));
         }
         if let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) {
             project.name = name.to_owned();
@@ -546,7 +574,7 @@ impl Data {
     /// "Kunde / Projekt" til visning.
     pub fn project_label(&self, project_id: Id) -> String {
         let Some(project) = self.project(project_id) else {
-            return "(slettet projekt)".to_owned();
+            return tr!("data.deleted_project");
         };
         let customer = self.customer(project.customer_id).map_or("?", |c| c.name.as_str());
         format!("{customer} / {}", project.name)
@@ -926,6 +954,25 @@ pub fn round_down_quarter(d: Duration) -> Duration {
 }
 
 /// Timer og minutter, f.eks. "1:15".
+/// En længde i ord, f.eks. "33 min" eller "1 t 05 min" ("1 h 05 min" på engelsk).
+pub fn format_length(d: Duration) -> String {
+    let minutes = d.num_minutes().max(0);
+    if minutes < 60 {
+        tr!("time.minutes", minutes = minutes)
+    } else {
+        tr!("time.hours_minutes", hours = minutes / 60, minutes = format!("{:02}", minutes % 60))
+    }
+}
+
+/// Typen ("Telefon"/"Pause") på brugerens sprog. Gemmes altid på dansk.
+pub fn note_label(note: &str) -> String {
+    match note {
+        NOTE_PHONE => tr!("note.phone"),
+        NOTE_PAUSE => tr!("note.pause"),
+        other => other.to_owned(),
+    }
+}
+
 pub fn format_hours_minutes(d: Duration) -> String {
     let mins = d.num_minutes().max(0);
     format!("{}:{:02}", mins / 60, mins % 60)
@@ -1417,6 +1464,20 @@ mod tests {
         assert_eq!(active.project_id, Some(p));
         assert_eq!(active.description, "Forside");
         assert_eq!(active.elapsed().num_minutes(), 30, "uret fortsætter fra før dvale");
+    }
+
+    #[test]
+    fn internal_names_follow_the_language_unless_renamed() {
+        let mut data = Data::default();
+        let internal = data.internal_project_id();
+        data.localize_internal_names_in("en");
+        assert_eq!(data.project_label(internal), "Internal / Internal time");
+        data.localize_internal_names_in("da");
+        assert_eq!(data.project_label(internal), "Intern / Intern tid");
+
+        data.rename_project(internal, "Administration").unwrap();
+        data.localize_internal_names_in("en");
+        assert_eq!(data.project_label(internal), "Internal / Administration", "eget navn bevares");
     }
 
     #[test]

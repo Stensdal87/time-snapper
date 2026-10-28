@@ -34,18 +34,18 @@ impl Action {
         Action::Export,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Action::SwitchProject => "Skift projekt",
-            Action::Pause => "Pause / fortsæt",
-            Action::Call => "Telefon / afslut",
-            Action::Stop => "Stop",
-            Action::ToggleWindow => "Vis / skjul vindue",
-            Action::Fold => "Fold sammen / ud",
-            Action::Search => "Søg i projekter",
-            Action::TimerTab => "Timer-fanen",
-            Action::HistoryTab => "Historik-fanen",
-            Action::Export => "Eksportér",
+            Action::SwitchProject => tr!("action.switch_project"),
+            Action::Pause => tr!("action.pause"),
+            Action::Call => tr!("action.call"),
+            Action::Stop => tr!("action.stop"),
+            Action::ToggleWindow => tr!("action.toggle_window"),
+            Action::Fold => tr!("action.fold"),
+            Action::Search => tr!("action.search"),
+            Action::TimerTab => tr!("action.timer_tab"),
+            Action::HistoryTab => tr!("action.history_tab"),
+            Action::Export => tr!("action.export"),
         }
     }
 
@@ -123,8 +123,9 @@ impl std::fmt::Display for KeyCombo {
         if self.shift {
             parts.push("Shift");
         }
+        let space = tr!("key.space");
         let key = match self.key {
-            Key::Space => "Mellemrum",
+            Key::Space => space.as_str(),
             key => key.name(),
         };
         parts.push(key);
@@ -163,7 +164,7 @@ impl TryFrom<String> for KeyCombo {
                 name => key = Key::from_name(name),
             }
         }
-        combo.key = key.ok_or_else(|| format!("ukendt tast i genvejen \"{text}\""))?;
+        combo.key = key.ok_or_else(|| tr!("key.unknown", shortcut = text))?;
         Ok(combo)
     }
 }
@@ -304,7 +305,7 @@ mod tests {
         let text: String = combo.into();
         assert_eq!(text, "Ctrl+Alt+Space");
         assert_eq!(KeyCombo::try_from(text).unwrap(), combo);
-        assert_eq!(combo.to_string(), "Ctrl+Alt+Mellemrum");
+        assert_eq!(combo.to_string(), format!("Ctrl+Alt+{}", tr!("key.space")));
         assert!(KeyCombo::try_from("Ctrl+Hokuspokus".to_owned()).is_err());
     }
 

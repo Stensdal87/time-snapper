@@ -93,36 +93,71 @@ pub enum CsvContent {
     Summary,
 }
 
-/// CSV i dansk Excel-format: semikolon som skilletegn, decimalkomma og UTF-8
-/// med BOM, så Excel viser æøå korrekt.
-pub fn to_csv(rows: &[ExportRow], content: CsvContent) -> String {
+/// Kolonnenavne og "I alt" på eksportens sprog (`lang` er "da" eller "en").
+fn heading(key: &str, lang: &str) -> String {
+    rust_i18n::t!(key, locale = lang).to_string()
+}
+
+fn entry_headers(lang: &str) -> Vec<String> {
+    ["date", "start", "end", "customer", "project", "type", "note", "duration", "hours"]
+        .iter()
+        .map(|k| heading(&format!("export.col_{k}"), lang))
+        .collect()
+}
+
+fn summary_headers(lang: &str) -> Vec<String> {
+    ["customer", "project", "count", "duration", "hours", "notes"]
+        .iter()
+        .map(|k| heading(&format!("export.col_{k}"), lang))
+        .collect()
+}
+
+/// Typen ("Telefon"/"Pause") på eksportens sprog.
+fn kind_label(kind: &str, lang: &str) -> String {
+    match kind {
+        crate::data::NOTE_PHONE => heading("note.phone", lang),
+        crate::data::NOTE_PAUSE => heading("note.pause", lang),
+        other => other.to_owned(),
+    }
+}
+
+/// CSV som Excel læser det på eksportens sprog: på dansk semikolon,
+/// decimalkomma og dd-mm-åååå; på engelsk komma, decimalpunktum og åååå-mm-dd.
+/// UTF-8 med BOM, så Excel viser æøå korrekt.
+pub fn to_csv(rows: &[ExportRow], content: CsvContent, lang: &str) -> String {
+    let danish = lang == "da";
+    let (separator, date_format) = if danish { (';', "%d-%m-%Y") } else { (',', "%Y-%m-%d") };
+    let hours_text = |d: Duration| {
+        let text = format!("{:.2}", hours(d));
+        if danish { text.replace('.', ",") } else { text }
+    };
     let mut lines: Vec<Vec<String>> = Vec::new();
     match content {
         CsvContent::Entries => {
-            lines.push(header(&["Dato", "Start", "Slut", "Kunde", "Projekt", "Type", "Note", "Varighed", "Timer"]));
+            lines.push(entry_headers(lang));
             for r in rows {
                 lines.push(vec![
-                    r.start.format("%d-%m-%Y").to_string(),
+                    r.start.format(date_format).to_string(),
                     r.start.format("%H:%M").to_string(),
                     r.end.format("%H:%M").to_string(),
                     r.customer.clone(),
                     r.project.clone(),
-                    r.kind.clone(),
+                    kind_label(&r.kind, lang),
                     r.description.clone(),
                     format_duration(r.duration()),
-                    decimal_hours(r.duration()),
+                    hours_text(r.duration()),
                 ]);
             }
         }
         CsvContent::Summary => {
-            lines.push(header(&["Kunde", "Projekt", "Antal", "Varighed", "Timer", "Noter"]));
+            lines.push(summary_headers(lang));
             for s in summarize(rows) {
                 lines.push(vec![
                     s.customer,
                     s.project,
                     s.count.to_string(),
                     format_duration(s.duration),
-                    decimal_hours(s.duration),
+                    hours_text(s.duration),
                     s.notes.join("; "),
                 ]);
             }
@@ -130,46 +165,37 @@ pub fn to_csv(rows: &[ExportRow], content: CsvContent) -> String {
     }
     let body: Vec<String> = lines
         .iter()
-        .map(|fields| fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(";"))
+        .map(|fields| fields.iter().map(|f| csv_field(f, separator)).collect::<Vec<_>>().join(&separator.to_string()))
         .collect();
     format!("\u{feff}{}\r\n", body.join("\r\n"))
 }
 
-fn header(names: &[&str]) -> Vec<String> {
-    names.iter().map(|s| s.to_string()).collect()
-}
-
-fn csv_field(text: &str) -> String {
-    if text.contains([';', '"', '\n', '\r']) {
+fn csv_field(text: &str, separator: char) -> String {
+    if text.contains([separator, '"', '\n', '\r']) {
         format!("\"{}\"", text.replace('"', "\"\""))
     } else {
         text.to_owned()
     }
 }
 
-/// Timer som decimaltal med komma, f.eks. "1,25".
-fn decimal_hours(d: Duration) -> String {
-    format!("{:.2}", hours(d)).replace('.', ",")
-}
-
 fn hours(d: Duration) -> f64 {
     d.num_seconds() as f64 / 3600.0
 }
 
-pub fn write_csv(path: &Path, rows: &[ExportRow], content: CsvContent) -> Result<(), String> {
-    std::fs::write(path, to_csv(rows, content)).map_err(|e| format!("Kunne ikke gemme: {e}"))
+pub fn write_csv(path: &Path, rows: &[ExportRow], content: CsvContent, lang: &str) -> Result<(), String> {
+    std::fs::write(path, to_csv(rows, content, lang)).map_err(|e| tr!("export.err_save", error = e))
 }
 
 /// Excel-fil med to faner: alle registreringer og summeret pr. projekt,
 /// begge med totaler nederst.
-pub fn write_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), String> {
-    build_xlsx(path, rows).map_err(|e| format!("Kunne ikke gemme Excel-filen: {e}"))
+pub fn write_xlsx(path: &Path, rows: &[ExportRow], lang: &str) -> Result<(), String> {
+    build_xlsx(path, rows, lang).map_err(|e| tr!("export.err_save_excel", error = e))
 }
 
-fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
+fn build_xlsx(path: &Path, rows: &[ExportRow], lang: &str) -> Result<(), XlsxError> {
     let bold = Format::new().set_bold();
     let header = Format::new().set_bold().set_border_bottom(FormatBorder::Thin);
-    let date = Format::new().set_num_format("dd-mm-yyyy");
+    let date = Format::new().set_num_format(if lang == "da" { "dd-mm-yyyy" } else { "yyyy-mm-dd" });
     let time = Format::new().set_num_format("hh:mm");
     // Varighed som brøkdel af et døgn, vist som timer:minutter:sekunder.
     let duration = Format::new().set_num_format("[h]:mm:ss");
@@ -181,8 +207,8 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
     let mut workbook = Workbook::new();
 
     let sheet = workbook.add_worksheet();
-    sheet.set_name("Registreringer")?;
-    write_header(sheet, &["Dato", "Start", "Slut", "Kunde", "Projekt", "Type", "Note", "Varighed", "Timer"], &header)?;
+    sheet.set_name(heading("export.sheet_entries", lang))?;
+    write_header(sheet, &entry_headers(lang), &header)?;
     for (i, r) in rows.iter().enumerate() {
         let row = i as u32 + 1;
         sheet.write_datetime_with_format(row, 0, r.start.date_naive(), &date)?;
@@ -190,14 +216,14 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
         sheet.write_datetime_with_format(row, 2, r.end.time(), &time)?;
         sheet.write_string(row, 3, &r.customer)?;
         sheet.write_string(row, 4, &r.project)?;
-        sheet.write_string(row, 5, &r.kind)?;
+        sheet.write_string(row, 5, kind_label(&r.kind, lang))?;
         sheet.write_string(row, 6, &r.description)?;
         sheet.write_number_with_format(row, 7, days(r.duration()), &duration)?;
         sheet.write_number_with_format(row, 8, hours(r.duration()), &decimal)?;
     }
     let last = rows.len() as u32;
     let total_row = last + 1;
-    sheet.write_string_with_format(total_row, 0, "I alt", &total_label)?;
+    sheet.write_string_with_format(total_row, 0, heading("export.total", lang), &total_label)?;
     for col in 1..7 {
         sheet.write_blank(total_row, col, &total_label)?;
     }
@@ -213,8 +239,8 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
 
     let summary = summarize(rows);
     let sheet = workbook.add_worksheet();
-    sheet.set_name("Summeret")?;
-    write_header(sheet, &["Kunde", "Projekt", "Antal", "Varighed", "Timer", "Noter"], &header)?;
+    sheet.set_name(heading("export.sheet_summary", lang))?;
+    write_header(sheet, &summary_headers(lang), &header)?;
     for (i, s) in summary.iter().enumerate() {
         let row = i as u32 + 1;
         sheet.write_string(row, 0, &s.customer)?;
@@ -226,7 +252,7 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
     }
     let last = summary.len() as u32;
     let total_row = last + 1;
-    sheet.write_string_with_format(total_row, 0, "I alt", &total_label)?;
+    sheet.write_string_with_format(total_row, 0, heading("export.total", lang), &total_label)?;
     sheet.write_blank(total_row, 1, &total_label)?;
     sheet.write_formula_with_format(total_row, 2, format!("=SUM(C2:C{})", last + 1).as_str(), &total_label)?;
     sheet.write_formula_with_format(total_row, 3, format!("=SUM(D2:D{})", last + 1).as_str(), &total_duration)?;
@@ -240,9 +266,9 @@ fn build_xlsx(path: &Path, rows: &[ExportRow]) -> Result<(), XlsxError> {
     workbook.save(path)
 }
 
-fn write_header(sheet: &mut Worksheet, names: &[&str], format: &Format) -> Result<(), XlsxError> {
+fn write_header(sheet: &mut Worksheet, names: &[String], format: &Format) -> Result<(), XlsxError> {
     for (col, name) in names.iter().enumerate() {
-        sheet.write_string_with_format(0, col as u16, *name, format)?;
+        sheet.write_string_with_format(0, col as u16, name, format)?;
     }
     Ok(())
 }
@@ -308,21 +334,30 @@ mod tests {
     #[test]
     fn csv_uses_danish_format_and_quotes_fields() {
         let rows = collect(&sample(), day(20), day(20));
-        let csv = to_csv(&rows, CsvContent::Entries);
+        let csv = to_csv(&rows, CsvContent::Entries, "da");
         assert!(csv.starts_with('\u{feff}'));
         let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
         assert_eq!(lines[0], "Dato;Start;Slut;Kunde;Projekt;Type;Note;Varighed;Timer");
         assert_eq!(lines[1], "20-10-2026;08:00;08:45;\"Kunde; \"\"A\"\"\";App;Telefon;;0:45:00;0,75");
         assert_eq!(lines[2], "20-10-2026;10:00;10:30;\"Kunde; \"\"A\"\"\";Web;;Kontaktformular;0:30:00;0,50");
 
-        let summary = to_csv(&rows, CsvContent::Summary);
+        let summary = to_csv(&rows, CsvContent::Summary, "da");
         assert!(summary.contains(";Web;1;0:30:00;0,50;Kontaktformular"));
+    }
+
+    #[test]
+    fn csv_in_english_uses_commas_points_and_iso_dates() {
+        let rows = collect(&sample(), day(20), day(20));
+        let csv = to_csv(&rows, CsvContent::Entries, "en");
+        let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
+        assert_eq!(lines[0], "Date,Start,End,Customer,Project,Type,Note,Duration,Hours");
+        assert_eq!(lines[1], "2026-10-20,08:00,08:45,\"Kunde; \"\"A\"\"\",App,Phone,,0:45:00,0.75");
     }
 
     #[test]
     fn writes_xlsx_file() {
         let path = std::env::temp_dir().join(format!("ts-export-{}.xlsx", std::process::id()));
-        write_xlsx(&path, &collect(&sample(), day(19), day(21))).unwrap();
+        write_xlsx(&path, &collect(&sample(), day(19), day(21)), "da").unwrap();
         let bytes = std::fs::read(&path).unwrap();
         std::fs::remove_file(&path).ok();
         assert!(bytes.starts_with(b"PK"), "xlsx er en zip-fil");

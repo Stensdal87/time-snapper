@@ -44,11 +44,11 @@ impl ExportDialog {
         }
     }
 
-    fn period(&self) -> Result<(NaiveDate, NaiveDate), &'static str> {
-        let from = parse_date(&self.from).ok_or("Ugyldig fra-dato (brug dd-mm-åååå)")?;
-        let to = parse_date(&self.to).ok_or("Ugyldig til-dato (brug dd-mm-åååå)")?;
+    fn period(&self) -> Result<(NaiveDate, NaiveDate), String> {
+        let from = parse_date(&self.from).ok_or_else(|| tr!("export.err_from"))?;
+        let to = parse_date(&self.to).ok_or_else(|| tr!("export.err_to"))?;
         if to < from {
-            return Err("Til-datoen skal være samme dag eller efter fra-datoen");
+            return Err(tr!("export.err_order"));
         }
         Ok((from, to))
     }
@@ -65,23 +65,23 @@ impl ExportDialog {
     pub fn show(&mut self, ctx: &egui::Context, data: &Data, frame: &eframe::Frame, always_on_top: bool) -> bool {
         let today = Local::now().date_naive();
         let period = self.period();
-        let rows = period.map(|(from, to)| export::collect(data, from, to));
+        let rows = period.clone().map(|(from, to)| export::collect(data, from, to));
         let mut keep_open = true;
         let mut export = false;
 
         let modal = egui::Modal::new(egui::Id::unique("export_dialog")).show(ctx, |ui| {
             ui.set_width(290.0);
-            ui.heading("📤 Eksportér registreringer");
+            ui.heading(tr!("export.title"));
             ui.add_space(4.0);
 
-            ui.label(RichText::new("Periode").strong());
+            ui.label(RichText::new(tr!("export.period")).strong());
             ui.horizontal_wrapped(|ui| {
-                let quick: [(&str, (NaiveDate, NaiveDate)); 5] = [
-                    ("I dag", (today, today)),
-                    ("Denne uge", this_week(today)),
-                    ("Sidste uge", this_week(today - Duration::days(7))),
-                    ("Denne måned", this_month(today)),
-                    ("Sidste måned", this_month(first_of_month(today) - Duration::days(1))),
+                let quick: [(String, (NaiveDate, NaiveDate)); 5] = [
+                    (tr!("export.today"), (today, today)),
+                    (tr!("export.this_week"), this_week(today)),
+                    (tr!("export.last_week"), this_week(today - Duration::days(7))),
+                    (tr!("export.this_month"), this_month(today)),
+                    (tr!("export.last_month"), this_month(first_of_month(today) - Duration::days(1))),
                 ];
                 for (label, range) in quick {
                     if ui.small_button(label).clicked() {
@@ -90,31 +90,31 @@ impl ExportDialog {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Fra");
+                ui.label(tr!("export.from"));
                 if ui.add(egui::TextEdit::singleline(&mut self.from).desired_width(90.0)).changed() {
                     self.result = None;
                 }
-                ui.label("til");
+                ui.label(tr!("export.to"));
                 if ui.add(egui::TextEdit::singleline(&mut self.to).desired_width(90.0)).changed() {
                     self.result = None;
                 }
             });
-            ui.label(RichText::new("Hele dage, begge dage medregnet.").weak().small());
+            ui.label(RichText::new(tr!("export.whole_days")).weak().small());
             ui.add_space(6.0);
 
-            ui.label(RichText::new("Format").strong());
+            ui.label(RichText::new(tr!("export.format")).strong());
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.format, FileFormat::Excel, "Excel (.xlsx)");
                 ui.selectable_value(&mut self.format, FileFormat::Csv, "CSV");
             });
             match self.format {
                 FileFormat::Excel => {
-                    ui.label(RichText::new("Fanerne \"Registreringer\" og \"Summeret\" med totaler.").weak().small());
+                    ui.label(RichText::new(tr!("export.excel_sheets")).weak().small());
                 }
                 FileFormat::Csv => {
                     ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.csv_content, CsvContent::Entries, "Alle registreringer");
-                        ui.selectable_value(&mut self.csv_content, CsvContent::Summary, "Summeret");
+                        ui.selectable_value(&mut self.csv_content, CsvContent::Entries, tr!("export.all_entries"));
+                        ui.selectable_value(&mut self.csv_content, CsvContent::Summary, tr!("export.summary"));
                     });
                 }
             }
@@ -122,24 +122,24 @@ impl ExportDialog {
 
             let has_rows = match &rows {
                 Ok(rows) if rows.is_empty() => {
-                    ui.label(RichText::new("Ingen registreringer i perioden.").weak());
+                    ui.label(RichText::new(tr!("export.none")).weak());
                     false
                 }
                 Ok(rows) => {
                     let total = rows.iter().fold(Duration::zero(), |sum, r| sum + r.duration());
-                    ui.label(format!("{} registreringer · i alt {}", rows.len(), format_duration(total)));
+                    ui.label(tr!("export.summary_line", count = rows.len(), total = format_duration(total)));
                     true
                 }
                 Err(e) => {
-                    ui.colored_label(ui.visuals().error_fg_color, *e);
+                    ui.colored_label(ui.visuals().error_fg_color, e.as_str());
                     false
                 }
             };
 
             match &self.result {
                 Some(Ok(path)) => {
-                    ui.colored_label(egui::Color32::from_rgb(80, 170, 90), format!("✔ Gemt: {}", path.display()));
-                    if ui.small_button("Åbn filen").clicked() {
+                    ui.colored_label(egui::Color32::from_rgb(80, 170, 90), tr!("export.saved", path = path.display()));
+                    if ui.small_button(tr!("export.open_file")).clicked() {
                         open_file(path);
                     }
                 }
@@ -151,8 +151,8 @@ impl ExportDialog {
             ui.add_space(8.0);
 
             ui.horizontal(|ui| {
-                export |= ui.add_enabled(has_rows, egui::Button::new("📤 Eksportér…")).on_hover_text("Enter").clicked();
-                if ui.button("Luk").on_hover_text("Esc").clicked() {
+                export |= ui.add_enabled(has_rows, egui::Button::new(tr!("export.export_button"))).on_hover_text("Enter").clicked();
+                if ui.button(tr!("common.close")).on_hover_text("Esc").clicked() {
                     keep_open = false;
                 }
             });
@@ -178,8 +178,8 @@ impl ExportDialog {
                     && let Some(path) = self.ask_path(from, to, frame)
                 {
                     let result = match self.format {
-                        FileFormat::Excel => export::write_xlsx(&path, rows),
-                        FileFormat::Csv => export::write_csv(&path, rows, self.csv_content),
+                        FileFormat::Excel => export::write_xlsx(&path, rows, &rust_i18n::locale()),
+                        FileFormat::Csv => export::write_csv(&path, rows, self.csv_content, &rust_i18n::locale()),
                     };
                     self.result = Some(result.map(|()| path));
                 }
@@ -207,7 +207,7 @@ impl ExportDialog {
         // også når Time Snapper er sat til at ligge øverst.
         let mut dialog = rfd::FileDialog::new()
             .set_parent(frame)
-            .set_title("Gem eksport")
+            .set_title(tr!("export.save_title"))
             .set_file_name(name)
             .add_filter(filter, &[ext]);
         if let Some(dir) = directories::UserDirs::new().and_then(|d| d.download_dir().map(PathBuf::from)) {
