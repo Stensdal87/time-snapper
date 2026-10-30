@@ -63,6 +63,12 @@ impl EntryEditor {
         }
     }
 
+    /// Med projektet valgt på forhånd.
+    pub fn with_project(mut self, project_id: Option<Id>) -> Self {
+        self.project_id = project_id;
+        self
+    }
+
     /// Registreringen som felterne beskriver den, eller hvad der er galt.
     fn build(&self) -> Result<TimeEntry, String> {
         let project_id = self.project_id.ok_or_else(|| tr!("editor.err_project"))?;

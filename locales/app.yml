@@ -926,3 +926,78 @@ internal.customer:
 internal.project:
   da: "Intern tid"
   en: "Internal time"
+item.show:
+  da: "📋 Vis registreringer…"
+  en: "📋 Show entries…"
+item.window_title:
+  da: "Registreringer – %{name}"
+  en: "Entries – %{name}"
+item.day:
+  da: "Dag"
+  en: "Day"
+item.week:
+  da: "Uge"
+  en: "Week"
+item.month:
+  da: "Måned"
+  en: "Month"
+item.all_time:
+  da: "Altid"
+  en: "All time"
+item.week_label:
+  da: "Uge %{week}, %{year}"
+  en: "Week %{week}, %{year}"
+item.month_label:
+  da: "%{month} %{year}"
+  en: "%{month} %{year}"
+item.earlier:
+  da: "Forrige"
+  en: "Previous"
+item.later:
+  da: "Næste"
+  en: "Next"
+item.back_to_now:
+  da: "Tilbage til nu"
+  en: "Back to now"
+item.none:
+  da: "Ingen registreringer i perioden."
+  en: "No entries in this period."
+item.since:
+  da: "Siden %{date}"
+  en: "Since %{date}"
+month.1:
+  da: "januar"
+  en: "January"
+month.2:
+  da: "februar"
+  en: "February"
+month.3:
+  da: "marts"
+  en: "March"
+month.4:
+  da: "april"
+  en: "April"
+month.5:
+  da: "maj"
+  en: "May"
+month.6:
+  da: "juni"
+  en: "June"
+month.7:
+  da: "juli"
+  en: "July"
+month.8:
+  da: "august"
+  en: "August"
+month.9:
+  da: "september"
+  en: "September"
+month.10:
+  da: "oktober"
+  en: "October"
+month.11:
+  da: "november"
+  en: "November"
+month.12:
+  da: "december"
+  en: "December"

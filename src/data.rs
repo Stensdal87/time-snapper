@@ -10,6 +10,13 @@ pub type Id = u64;
 pub const NOTE_PHONE: &str = "Telefon";
 pub const NOTE_PAUSE: &str = "Pause";
 
+/// Et udsnit af registreringerne: én kunde (alle dens projekter) eller ét projekt.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Scope {
+    Customer(Id),
+    Project(Id),
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Customer {
     pub id: Id,
@@ -917,6 +924,45 @@ impl Data {
         totals.sort_by_key(|(_, d)| std::cmp::Reverse(*d));
         totals
     }
+
+    /// Om registreringer på projektet hører til udsnittet.
+    pub fn in_scope(&self, scope: Scope, project_id: Id) -> bool {
+        match scope {
+            Scope::Project(id) => project_id == id,
+            Scope::Customer(id) => self.project(project_id).is_some_and(|p| p.customer_id == id),
+        }
+    }
+
+    /// Kundens navn eller "Kunde / Projekt".
+    pub fn scope_label(&self, scope: Scope) -> String {
+        match scope {
+            Scope::Project(id) => self.project_label(id),
+            Scope::Customer(id) => self.customer(id).map_or_else(|| "?".to_owned(), |c| c.name.clone()),
+        }
+    }
+
+    /// Udsnittets registreringer, der startede fra og med `from` til og med
+    /// `to` (`None` er ingen grænse), inkl. den kørende timer, sorteret efter start.
+    pub fn entries_in(&self, scope: Scope, from: Option<NaiveDate>, to: Option<NaiveDate>) -> Vec<DayEntry> {
+        let within = |e: &TimeEntry| {
+            let day = e.start.date_naive();
+            self.in_scope(scope, e.project_id) && from.is_none_or(|f| day >= f) && to.is_none_or(|t| day <= t)
+        };
+        let mut list: Vec<DayEntry> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| within(e))
+            .map(|(i, e)| DayEntry { index: Some(i), entry: e.clone() })
+            .collect();
+        if let Some(entry) = self.running_entry()
+            && within(&entry)
+        {
+            list.push(DayEntry { index: None, entry });
+        }
+        list.sort_by_key(|e| e.entry.start);
+        list
+    }
 }
 
 /// Nøgle til alfabetisk sortering efter dansk alfabet: store og små bogstaver
@@ -986,7 +1032,7 @@ pub fn format_duration(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use chrono::{Datelike, TimeZone};
 
     fn active_since(project_id: Option<Id>, minutes: i64) -> Option<ActiveTimer> {
         Some(ActiveTimer {
@@ -996,6 +1042,31 @@ mod tests {
             note: None,
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn scope_picks_customer_or_project_within_period() {
+        let mut data = Data::default();
+        let c1 = data.add_customer("Kunde 1");
+        let a = data.add_project(c1, "A");
+        let b = data.add_project(c1, "B");
+        let c2 = data.add_customer("Kunde 2");
+        let other = data.add_project(c2, "C");
+        let at = |day: u32, hour: u32| Local.with_ymd_and_hms(2026, 10, day, hour, 0, 0).unwrap();
+        for (project_id, day) in [(a, 1), (b, 2), (other, 2), (a, 3)] {
+            data.add_entry(TimeEntry { project_id, start: at(day, 9), end: at(day, 10), ..Default::default() });
+        }
+        let days = |list: Vec<DayEntry>| list.iter().map(|e| e.entry.start.day()).collect::<Vec<_>>();
+
+        assert_eq!(days(data.entries_in(Scope::Customer(c1), None, None)), [1, 2, 3]);
+        assert_eq!(days(data.entries_in(Scope::Project(a), None, None)), [1, 3]);
+        let oct = |d| NaiveDate::from_ymd_opt(2026, 10, d);
+        assert_eq!(days(data.entries_in(Scope::Customer(c1), oct(2), oct(3))), [2, 3]);
+        assert_eq!(days(data.entries_in(Scope::Customer(c2), None, oct(1))), Vec::<u32>::new());
+        // Den kørende timer kommer med, uden index.
+        data.active = active_since(Some(b), 5);
+        let running = data.entries_in(Scope::Project(b), None, None);
+        assert!(running.last().is_some_and(|e| e.index.is_none()));
     }
 
     #[test]

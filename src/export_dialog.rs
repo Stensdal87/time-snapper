@@ -6,7 +6,7 @@ use std::time::{Duration as StdDuration, Instant};
 use chrono::{Datelike, Duration, Local, Months, NaiveDate};
 use eframe::egui::{self, RichText};
 
-use crate::data::{format_duration, Data};
+use crate::data::{format_duration, Data, Scope};
 use crate::entry_editor::parse_date;
 use crate::export::{self, CsvContent};
 
@@ -21,6 +21,8 @@ pub struct ExportDialog {
     to: String,
     format: FileFormat,
     csv_content: CsvContent,
+    /// Kun én kunde eller ét projekt (fra vinduet med registreringer).
+    scope: Option<Scope>,
     /// Resultatet af sidste eksport: stien eller en fejl.
     result: Option<Result<PathBuf, String>>,
     /// Sat når "Gem som" venter på, at vinduet ikke længere ligger øverst.
@@ -39,9 +41,15 @@ impl ExportDialog {
             to: fmt(to),
             format: FileFormat::Excel,
             csv_content: CsvContent::Entries,
+            scope: None,
             result: None,
             save_requested: None,
         }
+    }
+
+    /// Eksport af én kunde eller ét projekt, med en periode valgt på forhånd.
+    pub fn for_scope(scope: Scope, from: NaiveDate, to: NaiveDate) -> Self {
+        Self { from: fmt(from), to: fmt(to), scope: Some(scope), ..Self::new() }
     }
 
     fn period(&self) -> Result<(NaiveDate, NaiveDate), String> {
@@ -65,13 +73,16 @@ impl ExportDialog {
     pub fn show(&mut self, ctx: &egui::Context, data: &Data, frame: &eframe::Frame, always_on_top: bool) -> bool {
         let today = Local::now().date_naive();
         let period = self.period();
-        let rows = period.clone().map(|(from, to)| export::collect(data, from, to));
+        let rows = period.clone().map(|(from, to)| export::collect(data, from, to, self.scope));
         let mut keep_open = true;
         let mut export = false;
 
         let modal = egui::Modal::new(egui::Id::unique("export_dialog")).show(ctx, |ui| {
             ui.set_width(290.0);
             ui.heading(tr!("export.title"));
+            if let Some(scope) = self.scope {
+                ui.label(RichText::new(data.scope_label(scope)).strong());
+            }
             ui.add_space(4.0);
 
             ui.label(RichText::new(tr!("export.period")).strong());
@@ -175,7 +186,7 @@ impl ExportDialog {
             if !always_on_top || waited >= LOWER_DELAY {
                 self.save_requested = None;
                 if let (Ok(rows), Ok((from, to))) = (&rows, period)
-                    && let Some(path) = self.ask_path(from, to, frame)
+                    && let Some(path) = self.ask_path(data, from, to, frame)
                 {
                     let result = match self.format {
                         FileFormat::Excel => export::write_xlsx(&path, rows, &rust_i18n::locale()),
@@ -197,12 +208,13 @@ impl ExportDialog {
     }
 
     /// Viser systemets "Gem som"-dialog. Starter i Overførsler/Downloads.
-    fn ask_path(&self, from: NaiveDate, to: NaiveDate, frame: &eframe::Frame) -> Option<PathBuf> {
+    fn ask_path(&self, data: &Data, from: NaiveDate, to: NaiveDate, frame: &eframe::Frame) -> Option<PathBuf> {
         let (ext, filter) = match self.format {
             FileFormat::Excel => ("xlsx", "Excel"),
             FileFormat::Csv => ("csv", "CSV"),
         };
-        let name = format!("timesnapper_{}_{}.{ext}", from.format("%Y-%m-%d"), to.format("%Y-%m-%d"));
+        let scope = self.scope.map(|s| format!("_{}", file_safe(&data.scope_label(s)))).unwrap_or_default();
+        let name = format!("timesnapper{scope}_{}_{}.{ext}", from.format("%Y-%m-%d"), to.format("%Y-%m-%d"));
         // Med vores vindue som forælder lægger vinduesmanageren dialogen ovenpå,
         // også når Time Snapper er sat til at ligge øverst.
         let mut dialog = rfd::FileDialog::new()
@@ -223,12 +235,25 @@ impl ExportDialog {
     }
 }
 
+/// Navnet som en del af et filnavn: kun bogstaver, tal, - og _.
+fn file_safe(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars() {
+        if c.is_alphanumeric() || c == '-' {
+            out.push(c);
+        } else if !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    out.trim_matches('_').to_owned()
+}
+
 fn fmt(date: NaiveDate) -> String {
     date.format("%d-%m-%Y").to_string()
 }
 
 /// Mandag til søndag i ugen, der indeholder `day`.
-fn this_week(day: NaiveDate) -> (NaiveDate, NaiveDate) {
+pub(crate) fn this_week(day: NaiveDate) -> (NaiveDate, NaiveDate) {
     let monday = day - Duration::days(day.weekday().num_days_from_monday() as i64);
     (monday, monday + Duration::days(6))
 }
@@ -238,7 +263,7 @@ fn first_of_month(day: NaiveDate) -> NaiveDate {
 }
 
 /// Første til sidste dag i måneden, der indeholder `day`.
-fn this_month(day: NaiveDate) -> (NaiveDate, NaiveDate) {
+pub(crate) fn this_month(day: NaiveDate) -> (NaiveDate, NaiveDate) {
     let first = first_of_month(day);
     let last = first.checked_add_months(Months::new(1)).map_or(day, |next| next - Duration::days(1));
     (first, last)
@@ -261,6 +286,12 @@ mod tests {
 
     fn d(y: i32, m: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    }
+
+    #[test]
+    fn scope_name_is_safe_in_file_names() {
+        assert_eq!(file_safe("Ny Kunde / Hotline"), "Ny_Kunde_Hotline");
+        assert_eq!(file_safe("Ærø: \"Test\""), "Ærø_Test");
     }
 
     #[test]

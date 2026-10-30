@@ -5,7 +5,7 @@ use std::path::Path;
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use rust_xlsxwriter::{Format, FormatBorder, Workbook, Worksheet, XlsxError};
 
-use crate::data::{format_duration, Data};
+use crate::data::{format_duration, Data, Scope};
 
 /// Én registrering klar til eksport, med navne slået op.
 pub struct ExportRow {
@@ -35,12 +35,14 @@ pub struct SummaryRow {
 }
 
 /// Afsluttede registreringer der startede fra og med `from` til og med `to`,
-/// sorteret efter starttid. Den kørende timer kommer ikke med.
-pub fn collect(data: &Data, from: NaiveDate, to: NaiveDate) -> Vec<ExportRow> {
+/// evt. kun for én kunde eller ét projekt, sorteret efter starttid. Den
+/// kørende timer kommer ikke med.
+pub fn collect(data: &Data, from: NaiveDate, to: NaiveDate, scope: Option<Scope>) -> Vec<ExportRow> {
     let mut rows: Vec<ExportRow> = data
         .entries
         .iter()
         .filter(|e| (from..=to).contains(&e.start.date_naive()))
+        .filter(|e| scope.is_none_or(|s| data.in_scope(s, e.project_id)))
         .map(|e| {
             let project = data.project(e.project_id);
             let customer = project.and_then(|p| data.customer(p.customer_id));
@@ -314,14 +316,24 @@ mod tests {
     #[test]
     fn collects_whole_days_inclusive() {
         let data = sample();
-        assert_eq!(collect(&data, day(20), day(20)).len(), 2);
-        assert_eq!(collect(&data, day(19), day(21)).len(), 4);
-        assert_eq!(collect(&data, day(22), day(31)).len(), 0);
+        assert_eq!(collect(&data, day(20), day(20), None).len(), 2);
+        assert_eq!(collect(&data, day(19), day(21), None).len(), 4);
+        assert_eq!(collect(&data, day(22), day(31), None).len(), 0);
+    }
+
+    #[test]
+    fn collects_only_the_chosen_project_or_customer() {
+        let data = sample();
+        let web = data.projects.iter().find(|p| p.name == "Web").unwrap();
+        let rows = collect(&data, day(19), day(21), Some(Scope::Project(web.id)));
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|r| r.project == "Web"));
+        assert_eq!(collect(&data, day(19), day(21), Some(Scope::Customer(web.customer_id))).len(), 4);
     }
 
     #[test]
     fn summary_merges_per_project() {
-        let rows = collect(&sample(), day(19), day(21));
+        let rows = collect(&sample(), day(19), day(21), None);
         let summary = summarize(&rows);
         assert_eq!(summary.len(), 2);
         assert_eq!(summary[0].project, "App");
@@ -333,7 +345,7 @@ mod tests {
 
     #[test]
     fn csv_uses_danish_format_and_quotes_fields() {
-        let rows = collect(&sample(), day(20), day(20));
+        let rows = collect(&sample(), day(20), day(20), None);
         let csv = to_csv(&rows, CsvContent::Entries, "da");
         assert!(csv.starts_with('\u{feff}'));
         let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
@@ -347,7 +359,7 @@ mod tests {
 
     #[test]
     fn csv_in_english_uses_commas_points_and_iso_dates() {
-        let rows = collect(&sample(), day(20), day(20));
+        let rows = collect(&sample(), day(20), day(20), None);
         let csv = to_csv(&rows, CsvContent::Entries, "en");
         let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
         assert_eq!(lines[0], "Date,Start,End,Customer,Project,Type,Note,Duration,Hours");
@@ -357,7 +369,7 @@ mod tests {
     #[test]
     fn writes_xlsx_file() {
         let path = std::env::temp_dir().join(format!("ts-export-{}.xlsx", std::process::id()));
-        write_xlsx(&path, &collect(&sample(), day(19), day(21)), "da").unwrap();
+        write_xlsx(&path, &collect(&sample(), day(19), day(21), None), "da").unwrap();
         let bytes = std::fs::read(&path).unwrap();
         std::fs::remove_file(&path).ok();
         assert!(bytes.starts_with(b"PK"), "xlsx er en zip-fil");

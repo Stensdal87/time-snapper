@@ -3,6 +3,7 @@
 mod break_reminder;
 pub(crate) mod breathing;
 mod compact;
+mod item_history;
 mod shortcuts_dialog;
 
 use std::collections::HashMap;
@@ -20,10 +21,11 @@ use crate::tray::{Tray, TrayAction, TrayProject, TrayState};
 use break_reminder::BreakReminder;
 use breathing::{Breathing, Exercise};
 use compact::{PendingMove, ProjectPicker, WindowLayout};
+use item_history::ItemHistory;
 use shortcuts_dialog::ShortcutsDialog;
 use crate::hotkeys::GlobalHotkeys;
 use crate::shortcuts::Action;
-use crate::data::{format_length, note_label, ActiveTimer, SortOrder, TemplateProject, format_duration, DayEntry, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
+use crate::data::{Scope, format_length, note_label, ActiveTimer, SortOrder, TemplateProject, format_duration, DayEntry, format_hours_minutes, round_down_quarter, round_up_quarter, CallTarget, Customer, Data, Id, Project, ThemeChoice, NOTE_PAUSE};
 
 /// Hvor ofte en kørende timers "sidst set" gemmes.
 const HEARTBEAT: StdDuration = StdDuration::from_secs(30);
@@ -125,6 +127,8 @@ pub struct TimeSnapperApp {
     break_reminder: BreakReminder,
     /// Åndedrætsøvelsen, mens den er i gang (eget vindue).
     breathing: Option<Breathing>,
+    /// Vinduet med registreringer for én kunde eller ét projekt.
+    item_history: Option<ItemHistory>,
     /// Kørte der en pause sidst? Bruges til at starte/stoppe øvelsen med pausen.
     was_on_pause: bool,
     /// "Computeren har sovet – fortsæt?" efter dvale (issue #6).
@@ -200,6 +204,7 @@ impl TimeSnapperApp {
             focus_search: false,
             break_reminder: BreakReminder::new(),
             breathing: None,
+            item_history: None,
             was_on_pause: false,
             sleep_prompt: None,
             new_template_project: String::new(),
@@ -461,6 +466,7 @@ impl TimeSnapperApp {
         let mut sort = None;
         let mut delete = None;
         let mut rename = None;
+        let mut show_entries = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             let mut any_match = false;
@@ -489,6 +495,11 @@ impl TimeSnapperApp {
                                     start_project = Some(project.id);
                                 }
                                 response.context_menu(|ui| {
+                                    if ui.button(tr!("item.show")).clicked() {
+                                        show_entries = Some(Scope::Project(project.id));
+                                        ui.close();
+                                    }
+                                    ui.separator();
                                     if ui.button(tr!("list.rename")).clicked() {
                                         rename = Some((Item::Project(project.id), project.name.clone()));
                                         ui.close();
@@ -523,6 +534,11 @@ impl TimeSnapperApp {
                         });
                     });
                 header.header_response.context_menu(|ui| {
+                    if ui.button(tr!("item.show")).clicked() {
+                        show_entries = Some(Scope::Customer(customer.id));
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button(tr!("list.expand_all")).clicked() {
                         fold_all = Some(true);
                         ui.close();
@@ -571,6 +587,9 @@ impl TimeSnapperApp {
         }
         if delete.is_some() {
             self.confirm_delete = delete;
+        }
+        if let Some(scope) = show_entries {
+            self.open_item_history(scope);
         }
         if let Some((item, name)) = rename {
             self.rename = Some(Rename { item, name, error: None, focused: false });
@@ -792,6 +811,7 @@ impl TimeSnapperApp {
         let day_total = totals.iter().fold(Duration::zero(), |sum, (_, d)| sum + *d);
         let mut open_editor = None;
         let mut toggle_rounding = None;
+        let mut show_entries = None;
         let date = self.history_date;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -807,10 +827,16 @@ impl TimeSnapperApp {
                         for (project_id, d) in &totals {
                             let count = entries.iter().filter(|e| e.entry.project_id == *project_id).count();
                             let notes = day_notes(&entries, *project_id);
-                            let response = ui.label(self.data.project_label(*project_id));
+                            let mut response = ui.label(self.data.project_label(*project_id));
                             if !notes.is_empty() {
-                                response.on_hover_text(format!("{}\n• {}", tr!("history.notes"), notes.join("\n• ")));
+                                response = response.on_hover_text(format!("{}\n• {}", tr!("history.notes"), notes.join("\n• ")));
                             }
+                            response.context_menu(|ui| {
+                                if ui.button(tr!("item.show")).clicked() {
+                                    show_entries = Some(Scope::Project(*project_id));
+                                    ui.close();
+                                }
+                            });
                             ui.label(RichText::new(format!("{count}×")).weak())
                                 .on_hover_text(tr!("history.entry_count", count = count));
                             ui.label(RichText::new(format_duration(*d)).monospace());
@@ -913,6 +939,9 @@ impl TimeSnapperApp {
         if let Some(project_id) = toggle_rounding {
             self.data.toggle_round_down(date, project_id);
             self.save();
+        }
+        if let Some(scope) = show_entries {
+            self.open_item_history(scope);
         }
     }
 
@@ -1059,6 +1088,7 @@ impl eframe::App for TimeSnapperApp {
         self.sleep_dialog(&ctx);
         self.break_dialog(&ctx);
         self.breathing_window(&ctx);
+        self.item_history_window(&ctx, frame);
         self.rename_dialog(&ctx);
         self.shortcuts_dialog(&ctx);
         if layout == WindowLayout::Normal && self.picker.is_some() {
@@ -1517,6 +1547,8 @@ impl TimeSnapperApp {
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         self.window_visible = false;
+        // Vinduet tegnes sammen med hovedvinduet og ville stå frosset.
+        self.item_history = None;
     }
 
     /// Stopper timeren og gemmer, inden programmet lukker.
